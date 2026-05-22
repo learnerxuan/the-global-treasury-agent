@@ -1,0 +1,12 @@
+_guide_docx_unzipped/
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+node_modules/
+dist/
+build/
+.DS_Store
+Thumbs.db
