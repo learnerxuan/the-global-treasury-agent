@@ -32,11 +32,11 @@ This schema contract covers:
 
 1. **Expected Payment Records**
    - Invoice, accounts receivable, or payment schedule rows.
-   - Describes what the SME expects to receive.
+   - Describes what the SME expects to receive after Code Tools parse and normalize raw CSV/XLSX rows.
 
 2. **Bank Statement Transactions**
    - Local booked bank transactions.
-   - Describes what actually entered or left the bank account.
+   - Describes what actually entered or left the bank account after Code Tools parse and normalize raw CSV/XLSX rows.
 
 3. **Payment Proof Input Descriptors**
    - Uploaded proof metadata before extraction.
@@ -305,6 +305,23 @@ type InputFileDescriptor = {
 
 This is what the SME expects to receive.
 
+This is **not** the raw CSV/XLSX row. Code Tools should parse raw expected-payment rows first, then normalize names, references, dates, currencies, and money fields into `ExpectedPaymentRecord`.
+
+Example:
+
+```text
+Raw CSV row:
+invoice_number = "INV-1001"
+customer = "Acme Pte Ltd"
+
+After Code Tools:
+invoiceNumber = "INV-1001"
+paymentReference.raw = "INV-1001"
+paymentReference.normalized = "INV1001"
+debtor.name = "Acme Pte Ltd"
+debtor.normalizedName = "ACME"
+```
+
 Use `creditor` and `debtor`, not `seller` and `buyer`, so the vocabulary stays aligned with payment systems.
 
 ### TypeScript Target
@@ -413,6 +430,8 @@ type ExpectedPaymentRecord = {
 ## Schema 2: Bank Statement Transaction
 
 This is the actual transaction booked by the bank.
+
+This is **not** the raw bank CSV/XLSX row. Code Tools should parse raw bank rows first, then normalize party names, references/remittance details, dates, direction, currency, and money fields into `BankStatementTransaction`.
 
 For incoming receipts:
 

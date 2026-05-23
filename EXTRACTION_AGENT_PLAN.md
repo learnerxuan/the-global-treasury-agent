@@ -997,6 +997,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 
     - Every tool result contains `route`, `rawText`, `candidateFinancialPayload`, `fieldConfidence`, `evidenceSpans`, and `warnings`.
     - Every result uses only raw extracted debtor, creditor, and reference fields. It must not include `normalizedName`, `normalized`, `normalized_reference`, or `reconciliationStatus`.
+    - Check both serialized output and direct object properties so `{ reference: { normalized: "INV1001" } }` cannot slip through Agent 1.
     - Every non-manual route emits at least one evidence span.
     - No tool result contains reconciliation concepts such as `matchScore`, `classification`, `bankTransaction`, `expectedPayment`, `fxScenario`, or `artifact`.
     - The text, table, and image real proof files choose three different route values when executed through the registry.
@@ -1027,6 +1028,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
           const result = await extractionToolRegistry[fixture.expectedRoute](fixture.descriptor);
           const serialized = JSON.stringify(result);
           expect(serialized).not.toContain("normalizedName");
+          expect(serialized).not.toContain("\"normalized\"");
           expect(serialized).not.toContain("normalized_reference");
           expect(serialized).not.toContain("reconciliationStatus");
           expect(serialized).not.toContain("matchScore");
@@ -1035,6 +1037,16 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
           expect(serialized).not.toContain("expectedPayment");
           expect(serialized).not.toContain("fxScenario");
           expect(serialized).not.toContain("artifact");
+
+          if (result.candidateFinancialPayload.reference) {
+            expect(result.candidateFinancialPayload.reference).not.toHaveProperty("normalized");
+          }
+          if (result.candidateFinancialPayload.debtor) {
+            expect(result.candidateFinancialPayload.debtor).not.toHaveProperty("normalizedName");
+          }
+          if (result.candidateFinancialPayload.creditor) {
+            expect(result.candidateFinancialPayload.creditor).not.toHaveProperty("normalizedName");
+          }
         }
       });
 
