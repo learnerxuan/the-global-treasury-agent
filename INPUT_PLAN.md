@@ -141,6 +141,10 @@ type NormalizedParty = {
   normalizedName: string | null;
 };
 
+type RawExtractedParty = {
+  rawName: string | null;
+};
+
 type AccountIdentifier = {
   iban: string | null;
   swiftBic: string | null;
@@ -151,6 +155,10 @@ type AccountIdentifier = {
 type PaymentReference = {
   raw: string | null;
   normalized: string | null;
+};
+
+type RawExtractedReference = {
+  raw: string | null;
 };
 
 type ExchangeRateInformation = {
@@ -194,9 +202,12 @@ type RemittanceInformation = {
 
 - `PaymentReference.raw` and `PaymentReference.normalized` must allow `null` because missing reference is an MVP scenario.
 - `NormalizedParty.name` must allow `null` because OCR may fail to identify debtor or creditor.
+- Agent 1 proof extraction outputs raw party names and raw references only. Deterministic code tools create normalized names and normalized references later.
 - Money amounts should be non-negative. Use `creditDebitIndicator` for bank direction.
 - For hackathon fixtures, bank dates may be bare dates. If full datetimes are available, preserve them.
 - Keep raw values somewhere when normalization changes them.
+- Expected payment records need `reconciliationStatus` so later matching can skip records that are already matched, partially matched, or void.
+- If `exchangeRateInformation.rateType` is `IMPLIED`, then both `sourceAmount` and `targetAmount` must be present.
 
 ## Schema 1: Expected Payment Record
 
@@ -221,6 +232,7 @@ type ExpectedPaymentRecord = {
   amountDue: MoneyAmount;
   expectedSettlementCurrency: CurrencyCode;
   paymentReference: PaymentReference;
+  reconciliationStatus: "OPEN" | "MATCHED" | "PARTIALLY_MATCHED" | "VOID";
   debtorReference: PaymentReference | null;
   purchaseOrderReference: PaymentReference | null;
   paymentTerms: string | null;
@@ -272,6 +284,7 @@ type ExpectedPaymentRecord = {
     "raw": "INV-1001",
     "normalized": "INV1001"
   },
+  "reconciliationStatus": "OPEN",
   "debtorReference": null,
   "purchaseOrderReference": null,
   "paymentTerms": "Due within 30 days",
@@ -452,6 +465,7 @@ It separates the financial payload from AI-specific extraction metadata:
 
 - `financialPayload` contains ISO-aligned payment data.
 - `aiMetadata` contains confidence, route, evidence spans, and manual review state.
+- Agent 1 does not normalize names or references. It extracts raw values. The Step 3 deterministic code tools produce normalized records after this output.
 
 ### TypeScript Target
 
@@ -471,15 +485,15 @@ type PaymentProofExtractionOutput = {
     paymentStatus: "ACSC" | "ACSP" | "PNDG" | "RJCT" | "CANC" | "UNKNOWN";
     paymentStatusLabel: string | null;
     rawPaymentStatus: string | null;
-    debtor: NormalizedParty;
-    creditor: NormalizedParty;
+    debtor: RawExtractedParty;
+    creditor: RawExtractedParty;
     debtorAccount: AccountIdentifier | null;
     creditorAccount: AccountIdentifier | null;
     paidAmount: MoneyAmount | null;
     paymentDate: ReconDate | null;
     valueDate: ReconDate | null;
     bookingDate: ReconDate | null;
-    reference: PaymentReference;
+    reference: RawExtractedReference;
     providerTransactionId: string | null;
     providerOrBankName: string | null;
     invoiceIds: string[];
@@ -517,12 +531,10 @@ type PaymentProofExtractionOutput = {
     "paymentStatusLabel": "Settled",
     "rawPaymentStatus": "Paid",
     "debtor": {
-      "name": "Acme Pte Ltd",
-      "normalizedName": "ACME"
+      "rawName": "Acme Pte Ltd"
     },
     "creditor": {
-      "name": "ReconPilot Sdn Bhd",
-      "normalizedName": "RECONPILOT"
+      "rawName": "ReconPilot Sdn Bhd"
     },
     "debtorAccount": {
       "iban": null,
@@ -544,8 +556,7 @@ type PaymentProofExtractionOutput = {
     "valueDate": null,
     "bookingDate": null,
     "reference": {
-      "raw": "INV-1001",
-      "normalized": "INV1001"
+      "raw": "INV-1001"
     },
     "providerTransactionId": "WISE-TRX-88291",
     "providerOrBankName": "Wise",
@@ -583,8 +594,8 @@ type PaymentProofExtractionOutput = {
     "extractionRoute": "parse_pdf_text",
     "overallConfidence": 0.96,
     "fieldConfidence": {
-      "financialPayload.debtor.name": 0.94,
-      "financialPayload.creditor.name": 0.96,
+      "financialPayload.debtor.rawName": 0.94,
+      "financialPayload.creditor.rawName": 0.96,
       "financialPayload.paidAmount.value": 0.99,
       "financialPayload.paidAmount.currency": 0.99,
       "financialPayload.paymentDate": 0.98,
@@ -645,6 +656,45 @@ Use this only when the proof contains both source and target amounts but no expl
 }
 ```
 
+Validation rule:
+
+```ts
+if (financialPayload.exchangeRateInformation?.rateType === "IMPLIED") {
+  sourceAmount must not be null;
+  targetAmount must not be null;
+}
+```
+
+## Normalized Post-Processing Record
+
+After Agent 1 extracts raw fields, deterministic code tools normalize the output. This matches the architecture rule:
+
+> Agent 1 extracts. Code normalizes.
+
+The normalized record is created after running tools such as `normalize_party_name()` and `normalize_reference()`.
+
+```ts
+type NormalizedPaymentProofRecord = {
+  schemaVersion: "1.0.0";
+  proofId: string;
+  sourceFileId: string;
+  financialPayload: Omit<
+    PaymentProofExtractionOutput["financialPayload"],
+    "debtor" | "creditor" | "reference"
+  > & {
+    debtor: NormalizedParty;
+    creditor: NormalizedParty;
+    reference: PaymentReference;
+  };
+  aiMetadata: PaymentProofExtractionOutput["aiMetadata"];
+  normalizationMetadata: {
+    normalizedAt: string;
+    toolsUsed: Array<"normalize_party_name" | "normalize_reference" | "normalize_date">;
+    warnings: Warning[];
+  };
+};
+```
+
 ## Implementation Order For This File
 
 1. Create `src/lib/recon/schemas.ts`.
@@ -665,12 +715,16 @@ Minimum tests:
 - valid bank statement transaction passes;
 - valid payment proof input descriptor passes;
 - valid payment proof extraction output passes;
+- expected payment record includes `reconciliationStatus`;
 - lowercase currency fails;
 - invalid date fails;
 - negative money amount fails;
 - missing reference is allowed but creates a warning;
 - missing debtor or creditor is allowed in extraction output but creates a warning;
-- `exchangeRateInformation` can be explicit, implied, or null.
+- Agent 1 extraction output uses raw debtor, creditor, and reference fields;
+- normalized payment proof record is created after deterministic normalization;
+- `exchangeRateInformation` can be explicit, implied, or null;
+- `IMPLIED` exchange rate requires both `sourceAmount` and `targetAmount`.
 
 ## Definition Of Done
 
@@ -678,8 +732,10 @@ The schema contract is done when:
 
 - the four schemas exist in TypeScript/Zod;
 - the four example JSON payloads validate;
+- expected payment records include `reconciliationStatus`;
 - missing messy-source fields can be represented truthfully as `null`;
 - warnings explain missing or low-confidence fields;
 - payment proof extraction separates `financialPayload` from `aiMetadata`;
+- payment proof extraction keeps raw party/reference fields before deterministic normalization;
 - exchange rate data is extracted only when present or clearly implied;
 - no reconciliation matching is implemented in this schema phase.
