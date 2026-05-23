@@ -14,7 +14,7 @@ The schema contract is in:
 
 [INPUT_PLAN.md](INPUT_PLAN.md)
 
-The Step 2 to Step 3 teammate handoff guide is in:
+The Agent 1 to Code Tools teammate handoff guide is in:
 
 [STEP_2_TO_3_TRANSITION_GUIDE.md](STEP_2_TO_3_TRANSITION_GUIDE.md)
 
