@@ -12,7 +12,7 @@ This file defines the implementation plan for **Agent 1: Extraction Agent**.
 
 The schema contract is in:
 
-[INPUTS_EXTRACTION_AGENT_PLAN.md](INPUTS_EXTRACTION_AGENT_PLAN.md)
+[INPUT_PLAN.md](INPUT_PLAN.md)
 
 Agent 1 should not perform reconciliation. Its only job is:
 
