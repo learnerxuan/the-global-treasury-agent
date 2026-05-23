@@ -16,7 +16,7 @@ The schema contract is in:
 
 The Agent 1 to Code Tools teammate handoff guide is in:
 
-[STEP_2_TO_3_TRANSITION_GUIDE.md](STEP_2_TO_3_TRANSITION_GUIDE.md)
+[AGENT_1_TO_CODE_TOOLS_HANDOFF_GUIDE.md](AGENT_1_TO_CODE_TOOLS_HANDOFF_GUIDE.md)
 
 Agent 1 should not perform reconciliation. Its only job is:
 
