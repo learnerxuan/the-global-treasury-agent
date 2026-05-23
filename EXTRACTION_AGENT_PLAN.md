@@ -58,6 +58,7 @@ goal
 | Situation | Tool |
 | --- | --- |
 | PDF has text layer | `parse_pdf_text` |
+| Plain text proof with `demoFixture.rawText` | `parse_pdf_text` |
 | PDF likely contains tables | `parse_pdf_table` |
 | Image or scanned proof | `parse_image_ocr` |
 | Low-quality, unknown, or ambiguous proof | `manual_correction` |
@@ -67,8 +68,11 @@ Route priority:
 1. If low quality or unreadable, use `manual_correction`.
 2. If PDF has table signal, use `parse_pdf_table`.
 3. If PDF has text layer, use `parse_pdf_text`.
-4. If image, use `parse_image_ocr`.
-5. Otherwise, use `manual_correction`.
+4. If `mimeType` is `text/plain` and `demoFixture.rawText` exists, use `parse_pdf_text`.
+5. If image, use `parse_image_ocr`.
+6. Otherwise, use `manual_correction`.
+
+For hackathon speed, keep the `parse_pdf_text` route name. It handles text-layer PDFs and plain text demo proof fixtures.
 
 ## Recommended File Structure
 
@@ -213,6 +217,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 - All demo extraction is fixture-backed and deterministic. No live OCR, no network, no LLM call, and no hidden dependency on uploaded binary parsing.
 - Money values remain decimal strings.
 - Missing fields are represented as `null` and warnings, never invented values.
+- For `FieldEvidence`, `normalizedValue` must stay `null` for debtor, creditor, reference, and invoice ID fields because deterministic code normalizes those later. `normalizedValue` may be set for low-level parsing only, such as money formatting (`"USD 10.00"` -> `"10.00"`) or date formatting, because that is extraction cleanup rather than reconciliation normalization.
 - `exchangeRateInformation` is populated only when explicit FX appears in the proof or when source and target amounts allow a clearly labelled `IMPLIED` rate.
 
 #### Step 2 Detailed Tasks
@@ -966,10 +971,46 @@ Implement:
 
 - route selection;
 - tool call;
+- `createDefaultFinancialPayload()` to provide every required `PaymentProofExtractionOutput.financialPayload` key with safe defaults:
+  - `documentType: "other"`;
+  - `paymentStatus: "UNKNOWN"`;
+  - `paymentStatusLabel: null`;
+  - `rawPaymentStatus: null`;
+  - `debtor: { rawName: null }`;
+  - `creditor: { rawName: null }`;
+  - `debtorAccount: null`;
+  - `creditorAccount: null`;
+  - `paidAmount: null`;
+  - `paymentDate: null`;
+  - `valueDate: null`;
+  - `bookingDate: null`;
+  - `reference: { raw: null }`;
+  - `providerTransactionId: null`;
+  - `providerOrBankName: null`;
+  - `invoiceIds: []`;
+  - `endToEndId: null`;
+  - `uetr: null`;
+  - `feeAmount: null`;
+  - `netAmount: null`;
+  - `sourceAmount: null`;
+  - `targetAmount: null`;
+  - `exchangeRateInformation: null`;
+  - `remittanceInformation: { raw: null, structured: null }`;
+  - `rawText: null`.
+- `mergeToolPayloadWithDefaults(toolResult)` to merge `candidateFinancialPayload` over `createDefaultFinancialPayload()` before schema validation. Arrays and nested objects must be replaced intentionally, not deep-merged in a way that preserves stale defaults.
+- `calculateOverallConfidence(fieldConfidence)` using a weighted average of critical fields:
+  - paid amount: `0.30`;
+  - payment date: `0.20`;
+  - reference or invoice IDs: `0.20`;
+  - debtor: `0.15`;
+  - creditor: `0.15`.
+  Missing fields count as `0`. Use the higher available confidence between `financialPayload.reference.raw` and invoice ID evidence for the reference bucket.
 - schema assembly;
 - schema validation;
 - manual review decision;
 - timeline writing.
+
+Manual review decision must set `aiMetadata.requiresManualReview` to `true` when `overallConfidence < 0.85`, the route is `manual_correction`, any critical field is missing, payment status is not `ACSC`, or warnings include `LOW_QUALITY_PROOF`, `LOW_CONFIDENCE_EXTRACTION`, or missing critical field codes.
 
 ### Step 5: Demo Runner
 
