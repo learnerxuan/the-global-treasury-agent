@@ -51,24 +51,27 @@ Useful references captured during planning:
 - Do not use the LLM or extraction agent for money math.
 - Do not implement full UBL, Peppol, ISO 20022 XML, accounting ledgers, tax, journal entries, or bank account storage in this phase.
 
-```xml
-<implementation_plan>
-  <task id="01">
-    <name>Bootstrap the Next.js + TypeScript project foundation</name>
-    <files>
-      <file>package.json</file>
-      <file>tsconfig.json</file>
-      <file>next.config.ts</file>
-      <file>vitest.config.ts</file>
-      <file>src/app/layout.tsx</file>
-      <file>src/app/page.tsx</file>
-      <file>src/test/setup.ts</file>
-    </files>
-    <read_first>
-      <file>FINAL_RECONPILOT_BLUEPRINT.md</file>
-      <file>.gitignore</file>
-    </read_first>
-    <action><![CDATA[
+## Implementation Tasks
+
+### Task 01: Bootstrap the Next.js + TypeScript project foundation
+
+**Files**
+
+- `package.json`
+- `tsconfig.json`
+- `next.config.ts`
+- `vitest.config.ts`
+- `src/app/layout.tsx`
+- `src/app/page.tsx`
+- `src/test/setup.ts`
+
+**Read First**
+
+- `FINAL_RECONPILOT_BLUEPRINT.md`
+- `.gitignore`
+
+**Action**
+
 Create the minimal Next.js App Router application in TypeScript.
 
 Use npm scripts:
@@ -96,38 +99,45 @@ Install/use these packages:
 - @types/react-dom
 
 Keep the first page simple: a project title, a short "Inputs + Extraction Agent" label, and placeholders for the three input groups. Do not build the dashboard yet.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 Create src/app/page.test.tsx only if a React test setup already exists. Otherwise, rely on typecheck for the initial shell.
 
 Expected initial verification:
 
 npm run typecheck
 npm test
-    ]]></test_code>
-    <verify>
-      <step>`npm run typecheck` passes.</step>
-      <step>`npm test` exits successfully, even if no tests are discovered yet only if Vitest is configured that way.</step>
-      <step>`npm run dev` can start later without changing project files.</step>
-    </verify>
-    <done>
-      The repo has a working Next.js + TypeScript skeleton and test runner.
-    </done>
-    <commit>chore: scaffold next typescript foundation</commit>
-  </task>
+```
 
-  <task id="02">
-    <name>Define finance-standard data schemas and TypeScript types</name>
-    <files>
-      <file>src/lib/recon/types.ts</file>
-      <file>src/lib/recon/schemas.ts</file>
-      <file>src/lib/recon/schemas.test.ts</file>
-    </files>
-    <read_first>
-      <file>FINAL_RECONPILOT_BLUEPRINT.md</file>
-      <file>docs/arc/plans/2026-05-23-inputs-extraction-agent-next-ts.md</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm run typecheck` passes.
+- `npm test` exits successfully, even if no tests are discovered yet only if Vitest is configured that way.
+- `npm run dev` can start later without changing project files.
+
+**Done**
+
+The repo has a working Next.js + TypeScript skeleton and test runner.
+
+**Suggested Commit**: `chore: scaffold next typescript foundation`
+
+### Task 02: Define finance-standard data schemas and TypeScript types
+
+**Files**
+
+- `src/lib/recon/types.ts`
+- `src/lib/recon/schemas.ts`
+- `src/lib/recon/schemas.test.ts`
+
+**Read First**
+
+- `FINAL_RECONPILOT_BLUEPRINT.md`
+- `docs/arc/plans/2026-05-23-inputs-extraction-agent-next-ts.md`
+
+**Action**
+
 Create Zod schemas and inferred TypeScript types for the three input families plus shared evidence primitives.
 
 Shared primitives:
@@ -223,8 +233,10 @@ PaymentProofExtraction:
 - warnings
 
 Export both Zod schemas and TypeScript types.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import {
   bankStatementTransactionSchema,
@@ -297,27 +309,32 @@ describe("recon schemas", () => {
     ).toThrow();
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- schemas` passes.</step>
-      <step>`npm run typecheck` proves inferred types are valid.</step>
-    </verify>
-    <done>
-      Schemas encode the industry-standard-inspired field contract before any parser or agent uses it.
-    </done>
-    <commit>feat: add recon input schemas</commit>
-  </task>
+```
 
-  <task id="03">
-    <name>Implement normalization helpers for dates, currencies, amounts, references, names, and direction</name>
-    <files>
-      <file>src/lib/recon/normalizers.ts</file>
-      <file>src/lib/recon/normalizers.test.ts</file>
-    </files>
-    <read_first>
-      <file>src/lib/recon/schemas.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- schemas` passes.
+- `npm run typecheck` proves inferred types are valid.
+
+**Done**
+
+Schemas encode the industry-standard-inspired field contract before any parser or agent uses it.
+
+**Suggested Commit**: `feat: add recon input schemas`
+
+### Task 03: Implement normalization helpers for dates, currencies, amounts, references, names, and direction
+
+**Files**
+
+- `src/lib/recon/normalizers.ts`
+- `src/lib/recon/normalizers.test.ts`
+
+**Read First**
+
+- `src/lib/recon/schemas.ts`
+
+**Action**
+
 Implement deterministic normalization utilities:
 
 - normalizeCurrency(input): uppercase and validate against the MVP ISO 4217 allowlist.
@@ -329,8 +346,10 @@ Implement deterministic normalization utilities:
 - makeDeterministicTransactionId(row): generate a stable ID when the bank row lacks one.
 
 Do not do fuzzy matching here. These helpers are parsing infrastructure only.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import {
   makeDeterministicTransactionId,
@@ -382,33 +401,38 @@ describe("normalizers", () => {
     expect(first).toMatch(/^bank_/);
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- normalizers` passes.</step>
-      <step>Ambiguous dates fail loudly.</step>
-      <step>Amounts return decimal strings, not floats.</step>
-    </verify>
-    <done>
-      All later parsers can produce clean, comparable data without embedding ad hoc cleanup logic.
-    </done>
-    <commit>feat: add recon normalization helpers</commit>
-  </task>
+```
 
-  <task id="04">
-    <name>Create input descriptors and demo fixtures for the three required input groups</name>
-    <files>
-      <file>src/lib/recon/input-descriptors.ts</file>
-      <file>src/lib/recon/fixtures/expected-payment-rows.ts</file>
-      <file>src/lib/recon/fixtures/bank-statement-rows.ts</file>
-      <file>src/lib/recon/fixtures/payment-proof-descriptors.ts</file>
-      <file>src/lib/recon/fixtures/index.ts</file>
-      <file>src/lib/recon/fixtures/fixtures.test.ts</file>
-    </files>
-    <read_first>
-      <file>FINAL_RECONPILOT_BLUEPRINT.md</file>
-      <file>src/lib/recon/schemas.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- normalizers` passes.
+- Ambiguous dates fail loudly.
+- Amounts return decimal strings, not floats.
+
+**Done**
+
+All later parsers can produce clean, comparable data without embedding ad hoc cleanup logic.
+
+**Suggested Commit**: `feat: add recon normalization helpers`
+
+### Task 04: Create input descriptors and demo fixtures for the three required input groups
+
+**Files**
+
+- `src/lib/recon/input-descriptors.ts`
+- `src/lib/recon/fixtures/expected-payment-rows.ts`
+- `src/lib/recon/fixtures/bank-statement-rows.ts`
+- `src/lib/recon/fixtures/payment-proof-descriptors.ts`
+- `src/lib/recon/fixtures/index.ts`
+- `src/lib/recon/fixtures/fixtures.test.ts`
+
+**Read First**
+
+- `FINAL_RECONPILOT_BLUEPRINT.md`
+- `src/lib/recon/schemas.ts`
+
+**Action**
+
 Create a lightweight input descriptor model for files without implementing real uploads yet.
 
 InputFileDescriptor:
@@ -445,8 +469,10 @@ Payment proof descriptors:
 - ambiguous low-quality image -> route should be `manual_correction`.
 
 Do not use real customer data.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import {
   bankStatementRows,
@@ -468,32 +494,37 @@ describe("fixtures", () => {
     expect(paymentProofDescriptors.some((proof) => proof.imageQuality === "low")).toBe(true);
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- fixtures` passes.</step>
-      <step>The fixture set can demonstrate all extraction tools without external files.</step>
-    </verify>
-    <done>
-      The team has stable demo inputs for the first two architecture blocks.
-    </done>
-    <commit>test: add recon input fixtures</commit>
-  </task>
+```
 
-  <task id="05">
-    <name>Implement expected payment and bank statement parsers</name>
-    <files>
-      <file>src/lib/recon/parsers/expected-payments.ts</file>
-      <file>src/lib/recon/parsers/bank-statements.ts</file>
-      <file>src/lib/recon/parsers/expected-payments.test.ts</file>
-      <file>src/lib/recon/parsers/bank-statements.test.ts</file>
-    </files>
-    <read_first>
-      <file>src/lib/recon/schemas.ts</file>
-      <file>src/lib/recon/normalizers.ts</file>
-      <file>src/lib/recon/fixtures/expected-payment-rows.ts</file>
-      <file>src/lib/recon/fixtures/bank-statement-rows.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- fixtures` passes.
+- The fixture set can demonstrate all extraction tools without external files.
+
+**Done**
+
+The team has stable demo inputs for the first two architecture blocks.
+
+**Suggested Commit**: `test: add recon input fixtures`
+
+### Task 05: Implement expected payment and bank statement parsers
+
+**Files**
+
+- `src/lib/recon/parsers/expected-payments.ts`
+- `src/lib/recon/parsers/bank-statements.ts`
+- `src/lib/recon/parsers/expected-payments.test.ts`
+- `src/lib/recon/parsers/bank-statements.test.ts`
+
+**Read First**
+
+- `src/lib/recon/schemas.ts`
+- `src/lib/recon/normalizers.ts`
+- `src/lib/recon/fixtures/expected-payment-rows.ts`
+- `src/lib/recon/fixtures/bank-statement-rows.ts`
+
+**Action**
+
 Implement parser functions that accept already-loaded CSV/XLSX-like rows as objects.
 
 parseExpectedPaymentRows(rows, sourceFileId):
@@ -532,8 +563,10 @@ parseBankStatementRows(rows, sourceFileId):
 - Validate through `bankStatementTransactionSchema`.
 
 Do not parse binary XLSX yet. For hackathon speed, use CSV-like object rows in this phase and wire real upload parsing later.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import { bankStatementRows, expectedPaymentRows } from "../fixtures";
 import { parseBankStatementRows } from "./bank-statements";
@@ -571,34 +604,39 @@ describe("input parsers", () => {
     expect(records[0].transactionId).toMatch(/^bank_/);
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- parsers` passes.</step>
-      <step>Parsed records validate through Zod schemas.</step>
-      <step>Debit rows remain represented as `DBIT` and positive amount.</step>
-    </verify>
-    <done>
-      Component 1 can normalize expected payment records and local bank statements into standard internal records.
-    </done>
-    <commit>feat: parse recon input rows</commit>
-  </task>
+```
 
-  <task id="06">
-    <name>Build extraction tool interfaces and deterministic mock tools</name>
-    <files>
-      <file>src/lib/recon/extraction/tools.ts</file>
-      <file>src/lib/recon/extraction/ocr-image.ts</file>
-      <file>src/lib/recon/extraction/parse-pdf-text.ts</file>
-      <file>src/lib/recon/extraction/parse-pdf-tables.ts</file>
-      <file>src/lib/recon/extraction/request-manual-correction.ts</file>
-      <file>src/lib/recon/extraction/tools.test.ts</file>
-    </files>
-    <read_first>
-      <file>src/lib/recon/schemas.ts</file>
-      <file>src/lib/recon/input-descriptors.ts</file>
-      <file>src/lib/recon/fixtures/payment-proof-descriptors.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- parsers` passes.
+- Parsed records validate through Zod schemas.
+- Debit rows remain represented as `DBIT` and positive amount.
+
+**Done**
+
+Component 1 can normalize expected payment records and local bank statements into standard internal records.
+
+**Suggested Commit**: `feat: parse recon input rows`
+
+### Task 06: Build extraction tool interfaces and deterministic mock tools
+
+**Files**
+
+- `src/lib/recon/extraction/tools.ts`
+- `src/lib/recon/extraction/ocr-image.ts`
+- `src/lib/recon/extraction/parse-pdf-text.ts`
+- `src/lib/recon/extraction/parse-pdf-tables.ts`
+- `src/lib/recon/extraction/request-manual-correction.ts`
+- `src/lib/recon/extraction/tools.test.ts`
+
+**Read First**
+
+- `src/lib/recon/schemas.ts`
+- `src/lib/recon/input-descriptors.ts`
+- `src/lib/recon/fixtures/payment-proof-descriptors.ts`
+
+**Action**
+
 Create a shared tool result contract:
 
 ExtractionToolName:
@@ -637,8 +675,10 @@ requestManualCorrection(descriptor, missingFields):
 - Return requires-review warnings and evidence source `manual`.
 
 These mock tools are allowed for the hackathon. Real OCR/PDF integrations can replace the same interfaces later.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import { paymentProofDescriptors } from "../fixtures";
 import { ocrImage } from "./ocr-image";
@@ -681,34 +721,39 @@ describe("extraction tools", () => {
     expect(result.warnings.join(" ")).toContain("paidAmount");
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- extraction` passes.</step>
-      <step>Each extraction tool returns evidence and confidence.</step>
-      <step>Manual correction never fabricates financial values.</step>
-    </verify>
-    <done>
-      The extraction agent has real callable tools, even if the first implementation is fixture-backed.
-    </done>
-    <commit>feat: add extraction tool interfaces</commit>
-  </task>
+```
 
-  <task id="07">
-    <name>Implement Agent 1 routing and structured proof JSON assembly</name>
-    <files>
-      <file>src/lib/recon/extraction/extraction-agent.ts</file>
-      <file>src/lib/recon/extraction/extraction-agent.test.ts</file>
-    </files>
-    <read_first>
-      <file>FINAL_RECONPILOT_BLUEPRINT.md</file>
-      <file>src/lib/recon/extraction/tools.ts</file>
-      <file>src/lib/recon/extraction/ocr-image.ts</file>
-      <file>src/lib/recon/extraction/parse-pdf-text.ts</file>
-      <file>src/lib/recon/extraction/parse-pdf-tables.ts</file>
-      <file>src/lib/recon/extraction/request-manual-correction.ts</file>
-      <file>src/lib/recon/schemas.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- extraction` passes.
+- Each extraction tool returns evidence and confidence.
+- Manual correction never fabricates financial values.
+
+**Done**
+
+The extraction agent has real callable tools, even if the first implementation is fixture-backed.
+
+**Suggested Commit**: `feat: add extraction tool interfaces`
+
+### Task 07: Implement Agent 1 routing and structured proof JSON assembly
+
+**Files**
+
+- `src/lib/recon/extraction/extraction-agent.ts`
+- `src/lib/recon/extraction/extraction-agent.test.ts`
+
+**Read First**
+
+- `FINAL_RECONPILOT_BLUEPRINT.md`
+- `src/lib/recon/extraction/tools.ts`
+- `src/lib/recon/extraction/ocr-image.ts`
+- `src/lib/recon/extraction/parse-pdf-text.ts`
+- `src/lib/recon/extraction/parse-pdf-tables.ts`
+- `src/lib/recon/extraction/request-manual-correction.ts`
+- `src/lib/recon/schemas.ts`
+
+**Action**
+
 Implement `runExtractionAgent(descriptor, options?)`.
 
 Agent loop:
@@ -740,8 +785,10 @@ Critical boundary:
 - The agent may flag ambiguity.
 - The agent may not match against expected payments or bank transactions.
 - The agent may not calculate FX conclusions.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import { paymentProofDescriptors } from "../fixtures";
 import { runExtractionAgent } from "./extraction-agent";
@@ -787,31 +834,36 @@ describe("Extraction Agent", () => {
     expect(result.extraction).not.toHaveProperty("bankTransactionId");
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- extraction-agent` passes.</step>
-      <step>At least three different routes are exercised by fixtures.</step>
-      <step>Low-quality/ambiguous proof requires manual review.</step>
-    </verify>
-    <done>
-      Agent 1 behaves visibly as an agent: observe, choose tool, observe result, output structured JSON.
-    </done>
-    <commit>feat: implement extraction agent routing</commit>
-  </task>
+```
 
-  <task id="08">
-    <name>Add agent activity timeline events for every extraction decision and tool call</name>
-    <files>
-      <file>src/lib/recon/timeline.ts</file>
-      <file>src/lib/recon/timeline.test.ts</file>
-      <file>src/lib/recon/extraction/extraction-agent.ts</file>
-      <file>src/lib/recon/extraction/extraction-agent.test.ts</file>
-    </files>
-    <read_first>
-      <file>FINAL_RECONPILOT_BLUEPRINT.md</file>
-      <file>src/lib/recon/extraction/extraction-agent.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- extraction-agent` passes.
+- At least three different routes are exercised by fixtures.
+- Low-quality/ambiguous proof requires manual review.
+
+**Done**
+
+Agent 1 behaves visibly as an agent: observe, choose tool, observe result, output structured JSON.
+
+**Suggested Commit**: `feat: implement extraction agent routing`
+
+### Task 08: Add agent activity timeline events for every extraction decision and tool call
+
+**Files**
+
+- `src/lib/recon/timeline.ts`
+- `src/lib/recon/timeline.test.ts`
+- `src/lib/recon/extraction/extraction-agent.ts`
+- `src/lib/recon/extraction/extraction-agent.test.ts`
+
+**Read First**
+
+- `FINAL_RECONPILOT_BLUEPRINT.md`
+- `src/lib/recon/extraction/extraction-agent.ts`
+
+**Action**
+
 Create timeline event support for the visible demo.
 
 TimelineEvent:
@@ -841,8 +893,10 @@ Update `runExtractionAgent` to accept optional timeline and write events:
 5. Extraction Agent flagged manual review when needed.
 
 Do not write files to disk yet. Keep timeline in memory for the app/API and terminal demo.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import { paymentProofDescriptors } from "./fixtures";
 import { createTimeline } from "./timeline";
@@ -861,33 +915,38 @@ describe("agent timeline", () => {
     expect(events.some((event) => event.toolName === result.extraction.extractionRoute)).toBe(true);
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- timeline` passes.</step>
-      <step>Every extraction run creates a user-visible activity trail.</step>
-    </verify>
-    <done>
-      The demo can show why Agent 1 is agentic instead of a hidden OCR function.
-    </done>
-    <commit>feat: add extraction agent timeline</commit>
-  </task>
+```
 
-  <task id="09">
-    <name>Expose input parsing and extraction through minimal Next.js API routes</name>
-    <files>
-      <file>src/app/api/recon/inputs/route.ts</file>
-      <file>src/app/api/recon/extract/route.ts</file>
-      <file>src/app/api/recon/demo/route.ts</file>
-      <file>src/lib/recon/api-contracts.ts</file>
-      <file>src/lib/recon/api-contracts.test.ts</file>
-    </files>
-    <read_first>
-      <file>src/lib/recon/parsers/expected-payments.ts</file>
-      <file>src/lib/recon/parsers/bank-statements.ts</file>
-      <file>src/lib/recon/extraction/extraction-agent.ts</file>
-      <file>src/lib/recon/fixtures/index.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- timeline` passes.
+- Every extraction run creates a user-visible activity trail.
+
+**Done**
+
+The demo can show why Agent 1 is agentic instead of a hidden OCR function.
+
+**Suggested Commit**: `feat: add extraction agent timeline`
+
+### Task 09: Expose input parsing and extraction through minimal Next.js API routes
+
+**Files**
+
+- `src/app/api/recon/inputs/route.ts`
+- `src/app/api/recon/extract/route.ts`
+- `src/app/api/recon/demo/route.ts`
+- `src/lib/recon/api-contracts.ts`
+- `src/lib/recon/api-contracts.test.ts`
+
+**Read First**
+
+- `src/lib/recon/parsers/expected-payments.ts`
+- `src/lib/recon/parsers/bank-statements.ts`
+- `src/lib/recon/extraction/extraction-agent.ts`
+- `src/lib/recon/fixtures/index.ts`
+
+**Action**
+
 Create API contracts and routes for the first two architecture blocks.
 
 POST /api/recon/inputs:
@@ -914,8 +973,10 @@ GET /api/recon/demo:
 - Useful for frontend/demo integration without uploads.
 
 Use Zod request/response schemas in `api-contracts.ts`.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import {
   demoResponseSchema,
@@ -956,33 +1017,38 @@ describe("API contracts", () => {
     expect(demoResponseSchema.shape).toHaveProperty("proofExtractions");
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm test -- api-contracts` passes.</step>
-      <step>`npm run typecheck` passes with Next route handlers.</step>
-      <step>`GET /api/recon/demo` returns JSON when the dev server is running.</step>
-    </verify>
-    <done>
-      The Next.js app has usable backend entry points for the input layer and Extraction Agent.
-    </done>
-    <commit>feat: expose recon input extraction APIs</commit>
-  </task>
+```
 
-  <task id="10">
-    <name>Create a terminal extraction demo and a simple first-screen proof of components 1 and 2</name>
-    <files>
-      <file>src/scripts/run-extraction-demo.ts</file>
-      <file>src/app/page.tsx</file>
-      <file>src/app/globals.css</file>
-      <file>src/scripts/run-extraction-demo.test.ts</file>
-    </files>
-    <read_first>
-      <file>src/app/api/recon/demo/route.ts</file>
-      <file>src/lib/recon/fixtures/index.ts</file>
-      <file>src/lib/recon/extraction/extraction-agent.ts</file>
-      <file>src/lib/recon/timeline.ts</file>
-    </read_first>
-    <action><![CDATA[
+**Verify**
+
+- `npm test -- api-contracts` passes.
+- `npm run typecheck` passes with Next route handlers.
+- `GET /api/recon/demo` returns JSON when the dev server is running.
+
+**Done**
+
+The Next.js app has usable backend entry points for the input layer and Extraction Agent.
+
+**Suggested Commit**: `feat: expose recon input extraction APIs`
+
+### Task 10: Create a terminal extraction demo and a simple first-screen proof of components 1 and 2
+
+**Files**
+
+- `src/scripts/run-extraction-demo.ts`
+- `src/app/page.tsx`
+- `src/app/globals.css`
+- `src/scripts/run-extraction-demo.test.ts`
+
+**Read First**
+
+- `src/app/api/recon/demo/route.ts`
+- `src/lib/recon/fixtures/index.ts`
+- `src/lib/recon/extraction/extraction-agent.ts`
+- `src/lib/recon/timeline.ts`
+
+**Action**
+
 Create `npm run demo:extract`.
 
 The script should print:
@@ -1016,8 +1082,10 @@ Update the first screen to show:
   - reasoning
 
 Keep UI restrained and useful. This is an operational finance tool, so favor compact tables and high contrast status chips. No decorative landing page.
-    ]]></action>
-    <test_code><![CDATA[
+
+**Test Code**
+
+```ts
 import { describe, expect, it } from "vitest";
 import { buildExtractionDemoModel } from "./run-extraction-demo";
 
@@ -1034,20 +1102,22 @@ describe("extraction demo model", () => {
     expect(routes).toContain("manual_correction");
   });
 });
-    ]]></test_code>
-    <verify>
-      <step>`npm run demo:extract` prints the complete component 1 and 2 flow.</step>
-      <step>`npm test -- run-extraction-demo` passes.</step>
-      <step>`npm run typecheck` passes.</step>
-      <step>`npm run build` passes.</step>
-    </verify>
-    <done>
-      A teammate can run one command and see the input layer plus agentic extraction behavior end to end.
-    </done>
-    <commit>feat: add extraction demo experience</commit>
-  </task>
-</implementation_plan>
 ```
+
+**Verify**
+
+- `npm run demo:extract` prints the complete component 1 and 2 flow.
+- `npm test -- run-extraction-demo` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
+
+**Done**
+
+A teammate can run one command and see the input layer plus agentic extraction behavior end to end.
+
+**Suggested Commit**: `feat: add extraction demo experience`
+
+
 
 ## Suggested Team Split For This Plan
 
