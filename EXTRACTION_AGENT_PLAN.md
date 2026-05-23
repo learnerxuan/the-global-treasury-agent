@@ -14,6 +14,10 @@ The schema contract is in:
 
 [INPUT_PLAN.md](INPUT_PLAN.md)
 
+The Step 2 to Step 3 teammate handoff guide is in:
+
+[STEP_2_TO_3_TRANSITION_GUIDE.md](STEP_2_TO_3_TRANSITION_GUIDE.md)
+
 Agent 1 should not perform reconciliation. Its only job is:
 
 > Turn messy payment proof files into ISO 20022-aligned structured JSON, with confidence, evidence, and review warnings.
