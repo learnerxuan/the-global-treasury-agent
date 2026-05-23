@@ -230,6 +230,12 @@ type DemoFixture = {
   rawTable?: string[][] | null;
   rawOcr?: string | null;
 };
+
+type FileStorageRef = {
+  kind: "local_path" | "object_storage" | "uploaded_blob";
+  uri: string;
+  sha256?: string | null;
+};
 ```
 
 ### Zod Implementation Notes
@@ -267,6 +273,7 @@ type InputFileDescriptor = {
   mimeType: string;
   inputKind: "expected_payment_records" | "bank_statement" | "payment_proof";
   sizeBytes: number | null;
+  storageRef: FileStorageRef | null;
   uploadedAt: IsoDateTime;
   parseStatus: "PENDING" | "PARSED" | "FAILED" | "NEEDS_MAPPING";
   warnings: Warning[];
@@ -283,6 +290,11 @@ type InputFileDescriptor = {
   "mimeType": "text/csv",
   "inputKind": "expected_payment_records",
   "sizeBytes": 12240,
+  "storageRef": {
+    "kind": "local_path",
+    "uri": "src/lib/recon/fixtures/expected-payments.csv",
+    "sha256": null
+  },
   "uploadedAt": "2026-05-23T18:30:00+08:00",
   "parseStatus": "PARSED",
   "warnings": []
@@ -522,6 +534,11 @@ type PaymentProofInputDescriptor = InputFileDescriptor & {
   "mimeType": "application/pdf",
   "inputKind": "payment_proof",
   "sizeBytes": 248910,
+  "storageRef": {
+    "kind": "local_path",
+    "uri": "src/lib/recon/fixtures/proofs/wise-transfer-inv-1001.pdf",
+    "sha256": null
+  },
   "uploadedAt": "2026-05-23T18:31:00+08:00",
   "parseStatus": "PENDING",
   "textLayer": true,
@@ -858,6 +875,7 @@ Minimum tests:
 - valid bank statement transaction passes;
 - valid general input file descriptor passes;
 - valid payment proof input descriptor passes;
+- input file descriptors include `storageRef` for real uploaded/local proof files;
 - valid payment proof extraction output passes;
 - valid input batch passes;
 - expected payment record includes `reconciliationStatus`;
@@ -885,6 +903,7 @@ The schema contract is done when:
 - all example JSON payloads validate;
 - expected payment records include `reconciliationStatus`;
 - uploaded files are grouped under an `InputBatch`;
+- uploaded files include `storageRef` so extraction/parsing tools can read real file content;
 - payment proof demo fixture data is nested under `demoFixture`;
 - MVP currencies are explicitly allowlisted;
 - missing messy-source fields can be represented truthfully as `null`;

@@ -62,7 +62,7 @@ goal
 | Situation | Tool |
 | --- | --- |
 | PDF has text layer | `parse_pdf_text` |
-| Plain text proof with `demoFixture.rawText` | `parse_pdf_text` |
+| Plain text proof with file text content | `parse_pdf_text` |
 | PDF likely contains tables | `parse_pdf_table` |
 | Image or scanned proof | `parse_image_ocr` |
 | Low-quality, unknown, or ambiguous proof | `manual_correction` |
@@ -72,11 +72,11 @@ Route priority:
 1. If low quality or unreadable, use `manual_correction`.
 2. If PDF has table signal, use `parse_pdf_table`.
 3. If PDF has text layer, use `parse_pdf_text`.
-4. If `mimeType` is `text/plain` and `demoFixture.rawText` exists, use `parse_pdf_text`.
+4. If `mimeType` is `text/plain`, use `parse_pdf_text`.
 5. If image, use `parse_image_ocr`.
 6. Otherwise, use `manual_correction`.
 
-For hackathon speed, keep the `parse_pdf_text` route name. It handles text-layer PDFs and plain text demo proof fixtures.
+For hackathon speed, keep the `parse_pdf_text` route name. It handles text-layer PDFs and plain text proof files.
 
 ## Recommended File Structure
 
@@ -178,23 +178,25 @@ Define:
 - `ExtractionRoute`
 - shared helper types
 
-### Step 2: Implement Fixture-Backed Tools
+### Step 2: Implement Real File Extraction Tools With Fixture Fallbacks
 
 #### Step 2 File Structure Lock
 
 Create:
 
-- `src/lib/recon/extraction/fixtures.ts` - demo descriptors and expected route metadata for the four Step 2 tools.
-- `src/lib/recon/extraction/fixtures.test.ts` - fixture coverage for all required routes.
+- `src/lib/recon/extraction/fixtures.ts` - deterministic fallback descriptors and expected route metadata for tests and emergency demo fallback only.
+- `src/lib/recon/extraction/fixtures.test.ts` - fallback fixture coverage for all required routes.
 - `src/lib/recon/extraction/extract-payment-fields.ts` - deterministic fixture parsing helpers for money, dates, invoice IDs, status, parties, and FX.
 - `src/lib/recon/extraction/extract-payment-fields.test.ts` - helper unit tests.
 - `src/lib/recon/extraction/evidence.ts` - evidence span and warning builders used by all tools.
 - `src/lib/recon/extraction/evidence.test.ts` - builder unit tests.
-- `src/lib/recon/extraction/parse-pdf-text.ts` - fixture-backed text-layer PDF extraction tool.
+- `src/lib/recon/extraction/read-proof-source.ts` - shared file reader that loads actual uploaded proof content before falling back to `demoFixture`.
+- `src/lib/recon/extraction/read-proof-source.test.ts` - file reader tests for real files and fallback mode.
+- `src/lib/recon/extraction/parse-pdf-text.ts` - real text-layer PDF/plain text extraction tool with fixture fallback.
 - `src/lib/recon/extraction/parse-pdf-text.test.ts` - text PDF tool tests.
-- `src/lib/recon/extraction/parse-pdf-table.ts` - fixture-backed table PDF extraction tool.
+- `src/lib/recon/extraction/parse-pdf-table.ts` - real PDF table extraction tool with fixture fallback.
 - `src/lib/recon/extraction/parse-pdf-table.test.ts` - table PDF tool tests.
-- `src/lib/recon/extraction/parse-image-ocr.ts` - fixture-backed image/OCR extraction tool.
+- `src/lib/recon/extraction/parse-image-ocr.ts` - real image OCR/vision extraction tool with fixture fallback.
 - `src/lib/recon/extraction/parse-image-ocr.test.ts` - image OCR tool tests.
 - `src/lib/recon/extraction/manual-correction.ts` - manual correction fallback tool.
 - `src/lib/recon/extraction/manual-correction.test.ts` - manual correction tool tests.
@@ -214,11 +216,12 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 
 #### Step 2 Boundaries
 
-- This plan assumes `PaymentProofInputDescriptor` extends the general `InputFileDescriptor` from `INPUT_PLAN.md`. Required inherited fields: `parseStatus`, `uploadedAt`, and `warnings`. Required proof fixture field: `demoFixture`.
-- For demo mode, raw proof content must be stored under `descriptor.demoFixture`. Do not put `rawText`, `rawTable`, or `rawOcr` directly on the descriptor.
+- This plan assumes `PaymentProofInputDescriptor` extends the general `InputFileDescriptor` from `INPUT_PLAN.md`. Required inherited fields: `parseStatus`, `uploadedAt`, and `warnings`. Required real-file locator: `storageRef`. Optional fallback field: `demoFixture`.
+- The primary demo path must read actual uploaded proof files from `descriptor.storageRef`. Do not make the main demo depend on pre-filled `demoFixture` content.
+- `demoFixture` is allowed only for tests, offline development, and emergency fallback when the real file cannot be read. Do not put `rawText`, `rawTable`, or `rawOcr` directly on the descriptor.
 - Tools return `ExtractionToolResult`, not final `PaymentProofExtractionOutput`.
 - Tools extract raw fields only. They must not normalize references, normalize party names, score candidates, fetch FX rates, classify matches, or write reconciliation artifacts.
-- All demo extraction is fixture-backed and deterministic. No live OCR, no network, no LLM call, and no hidden dependency on uploaded binary parsing.
+- Demo extraction must be real-file-backed: PDF tools read actual PDF/plain text file bytes, and image tools run OCR/vision over the actual proof image or rendered PDF page. Fallback fixture extraction must be visible in warnings and timeline events when used.
 - Money values remain decimal strings.
 - Missing fields are represented as `null` and warnings, never invented values.
 - For `FieldEvidence`, `normalizedValue` must stay `null` for debtor, creditor, reference, and invoice ID fields because deterministic code normalizes those later. `normalizedValue` may be set for low-level parsing only, such as money formatting (`"USD 10.00"` -> `"10.00"`) or date formatting, because that is extraction cleanup rather than reconciliation normalization.
@@ -228,7 +231,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 
 ```xml
 <task id="1" depends="" type="auto">
-  <name>Create fixture descriptors for all extraction routes</name>
+  <name>Create proof descriptors and fallback fixtures for all extraction routes</name>
   <files>
     <create>src/lib/recon/extraction/fixtures.ts</create>
     <test>src/lib/recon/extraction/fixtures.test.ts</test>
@@ -238,14 +241,14 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     EXTRACTION_AGENT_PLAN.md
   </read_first>
   <action>
-    Create route fixtures for the Step 2 tools. Export `proofToolFixtures` with exactly four records:
+    Create route fixtures for the Step 2 tools. Export `proofToolFixtures` with exactly four records. Each fixture must include a `storageRef` pointing to a real proof file path under `src/lib/recon/fixtures/proofs/` and a matching `demoFixture` fallback for tests.
 
     1. `textPdfProof`: `expectedRoute` is `parse_pdf_text`; descriptor file name `wise-transfer-inv-1001.pdf`; MIME type `application/pdf`; `textLayer: true`; `tableLikely: false`; `imageQuality: "high"`; `demoFixture.rawText` contains `Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Exchange rate: 1 USD = 4.2500 MYR. Date 2026-05-20. Status: Paid. Payer: Acme Pte Ltd. Transaction ID: WISE-TRX-88291.`
     2. `tablePdfProof`: `expectedRoute` is `parse_pdf_table`; descriptor file name `bank-advice-inv-1002.pdf`; MIME type `application/pdf`; `textLayer: true`; `tableLikely: true`; `imageQuality: "high"`; `demoFixture.rawTable` contains key-value rows for payer `Beta Exports Ltd`, beneficiary `ReconPilot Sdn Bhd`, amount `SGD 250.00`, target amount `MYR 875.00`, reference `INV-1002`, payment date `2026-05-21`, status `Completed`, bank `DBS`.
     3. `imageOcrProof`: `expectedRoute` is `parse_image_ocr`; descriptor file name `scanned-slip-inv-1003.png`; MIME type `image/png`; `textLayer: false`; `tableLikely: false`; `imageQuality: "medium"`; `demoFixture.rawOcr` contains `TRANSFER RECEIPT PAID USD 200.00 REF INV-1003 DATE 2026-05-22 SENDER Gamma Trading BENEFICIARY ReconPilot`.
     4. `manualCorrectionProof`: `expectedRoute` is `manual_correction`; descriptor file name `blurred-proof-unknown.jpg`; MIME type `image/jpeg`; `textLayer: false`; `tableLikely: false`; `imageQuality: "low"`; `demoFixture.rawOcr` is `null`.
 
-    Each descriptor must use `inputKind: "payment_proof"`, `schemaVersion: "1.0.0"`, `parseStatus: "PENDING"`, `uploadedAt: "2026-05-23T18:31:00+08:00"`, `sizeBytes` as a non-null positive number, and `warnings: []`.
+    Each descriptor must use `inputKind: "payment_proof"`, `schemaVersion: "1.0.0"`, `parseStatus: "PENDING"`, `uploadedAt: "2026-05-23T18:31:00+08:00"`, `sizeBytes` as a non-null positive number, `storageRef` as the real proof file locator, and `warnings: []`.
   </action>
   <test_code>
     import { describe, expect, it } from "vitest";
@@ -262,9 +265,10 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
         ]);
       });
 
-      it("keeps fixture content under demoFixture", () => {
+      it("keeps fallback fixture content under demoFixture and real file location under storageRef", () => {
         for (const fixture of proofToolFixtures) {
           expect(fixture.descriptor.inputKind).toBe("payment_proof");
+          expect(fixture.descriptor.storageRef).toBeDefined();
           expect(fixture.descriptor.demoFixture).toBeDefined();
           expect("rawText" in fixture.descriptor).toBe(false);
           expect("rawTable" in fixture.descriptor).toBe(false);
@@ -283,11 +287,72 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     npm exec vitest run src/lib/recon/extraction/fixtures.test.ts
     npm exec tsc -- --noEmit
   </verify>
-  <done>Fixture descriptors exist for parse_pdf_text, parse_pdf_table, parse_image_ocr, and manual_correction with all raw demo content nested under demoFixture.</done>
+  <done>Proof descriptors exist for parse_pdf_text, parse_pdf_table, parse_image_ocr, and manual_correction with real file storageRef values and fallback content nested under demoFixture.</done>
   <commit>feat(extraction): add proof tool fixtures</commit>
 </task>
 
 <task id="2" depends="1" type="auto">
+  <name>Create real proof source reader with fixture fallback</name>
+  <files>
+    <create>src/lib/recon/extraction/read-proof-source.ts</create>
+    <test>src/lib/recon/extraction/read-proof-source.test.ts</test>
+  </files>
+  <read_first>
+    INPUT_PLAN.md
+    src/lib/recon/extraction/fixtures.ts
+    src/lib/recon/types.ts
+  </read_first>
+  <action>
+    Create `readProofSource(descriptor)` as the only place Step 2 tools read proof content.
+
+    It must:
+
+    - read actual uploaded proof files from `descriptor.storageRef`;
+    - support local file paths for demo fixtures;
+    - return source metadata: `{ mode: "real_file" | "fixture_fallback"; fileName; mimeType; bytes?; text?; fallbackReason? }`;
+    - use `descriptor.demoFixture` only when the real file is missing, unreadable, or intentionally unavailable in unit tests;
+    - emit a `LOW_QUALITY_PROOF` or read-warning object when fallback mode is used;
+    - never silently prefer `demoFixture` when `storageRef` points to a readable file.
+
+    Do not parse financial fields in this reader. It only loads source content for route-specific tools.
+  </action>
+  <test_code>
+    import { describe, expect, it } from "vitest";
+    import { proofToolFixtures } from "./fixtures";
+    import { readProofSource } from "./read-proof-source";
+
+    describe("readProofSource", () => {
+      it("prefers real files over demoFixture fallback when storageRef is readable", async () => {
+        const fixture = proofToolFixtures.find((item) => item.expectedRoute === "parse_pdf_text");
+        const result = await readProofSource(fixture!.descriptor);
+        expect(result.mode).toBe("real_file");
+        expect(result.fileName).toBe(fixture!.descriptor.fileName);
+      });
+
+      it("uses demoFixture only as explicit fallback when real file cannot be read", async () => {
+        const fixture = proofToolFixtures.find((item) => item.expectedRoute === "parse_pdf_text")!;
+        const result = await readProofSource({
+          ...fixture.descriptor,
+          storageRef: {
+            kind: "local_path",
+            uri: "missing/proof.pdf",
+            sha256: null,
+          },
+        });
+        expect(result.mode).toBe("fixture_fallback");
+        expect(result.fallbackReason).toContain("missing/proof.pdf");
+      });
+    });
+  </test_code>
+  <verify>
+    npm exec vitest run src/lib/recon/extraction/read-proof-source.test.ts
+    npm exec tsc -- --noEmit
+  </verify>
+  <done>readProofSource reads actual proof files first and uses demoFixture only as explicit fallback with observable metadata.</done>
+  <commit>feat(extraction): add real proof source reader</commit>
+</task>
+
+<task id="3" depends="1,2" type="auto">
   <name>Create deterministic field extraction helpers</name>
   <files>
     <create>src/lib/recon/extraction/extract-payment-fields.ts</create>
@@ -298,7 +363,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     src/lib/recon/types.ts
   </read_first>
   <action>
-    Create pure helper functions used by fixture-backed tools:
+    Create pure helper functions used by real extraction tools after they obtain text/table/OCR output:
 
     - `extractMoney(text, preferredCurrency?)` returns `{ value, currency, original } | null` and accepts only `MYR`, `USD`, `SGD`, and `EUR`.
     - `extractDate(text)` returns a `YYYY-MM-DD` string or `null`.
@@ -384,7 +449,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add deterministic payment field helpers</commit>
 </task>
 
-<task id="3" depends="1" type="auto">
+<task id="4" depends="1" type="auto">
   <name>Create evidence span and warning builders</name>
   <files>
     <create>src/lib/recon/extraction/evidence.ts</create>
@@ -464,7 +529,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add evidence and warning builders</commit>
 </task>
 
-<task id="4" depends="1,2,3" type="auto">
+<task id="5" depends="1,2,3,4" type="auto">
   <name>Implement text-layer PDF extraction tool</name>
   <files>
     <create>src/lib/recon/extraction/parse-pdf-text.ts</create>
@@ -477,12 +542,18 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     src/lib/recon/extraction/tools.ts
   </read_first>
   <action>
-    Implement `parsePdfText(descriptor)` for descriptors with `demoFixture.rawText`.
+    Implement `parsePdfText(descriptor)` for real text-layer PDFs and plain text proof files.
+
+    It must call `readProofSource(descriptor)` first. If source mode is `real_file`, parse the actual file content:
+
+    - for `text/plain`, read text directly;
+    - for `application/pdf`, extract embedded text from PDF bytes using the project-approved PDF text parser;
+    - if real file parsing fails, fall back to `demoFixture.rawText` only through `readProofSource()` and include fallback warning/timeline metadata.
 
     Return an `ExtractionToolResult` with:
 
     - `route: "parse_pdf_text"`.
-    - `rawText` from the descriptor fixture.
+    - `rawText` from the actual file parser or explicit fallback source.
     - `candidateFinancialPayload.documentType: "provider_receipt"`.
     - `paymentStatus: "ACSC"` for Paid, Completed, or Settled text.
     - raw debtor from text after `Payer:`.
@@ -498,7 +569,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     - field confidence values at or above `0.94` for text-derived amount, date, reference, payer, creditor, and FX.
     - evidence spans for amount, date, reference, debtor, creditor, and FX when present.
 
-    If `demoFixture.rawText` is missing, return `route: "parse_pdf_text"`, `rawText: null`, empty candidate fields, `LOW_QUALITY_PROOF`, and no invented values.
+    If no real text and no fallback text exists, return `route: "parse_pdf_text"`, `rawText: null`, empty candidate fields, `LOW_QUALITY_PROOF`, and no invented values.
   </action>
   <test_code>
     import { describe, expect, it } from "vitest";
@@ -557,7 +628,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add text pdf extraction tool</commit>
 </task>
 
-<task id="5" depends="1,2,3" type="auto">
+<task id="6" depends="1,2,3,4" type="auto">
   <name>Implement table PDF extraction tool</name>
   <files>
     <create>src/lib/recon/extraction/parse-pdf-table.ts</create>
@@ -570,7 +641,9 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     src/lib/recon/extraction/tools.ts
   </read_first>
   <action>
-    Implement `parsePdfTable(descriptor)` for descriptors with `demoFixture.rawTable`.
+    Implement `parsePdfTable(descriptor)` for real PDFs with table-like payment data.
+
+    It must call `readProofSource(descriptor)` first. If source mode is `real_file`, parse table candidates from the actual PDF bytes using the project-approved PDF table/text extraction approach. If real table parsing fails, fall back to `demoFixture.rawTable` only through `readProofSource()` and include fallback warning/timeline metadata.
 
     Convert the raw table to searchable text with `tableToText`, then extract:
 
@@ -638,7 +711,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add table pdf extraction tool</commit>
 </task>
 
-<task id="6" depends="1,2,3" type="auto">
+<task id="7" depends="1,2,3,4" type="auto">
   <name>Implement image OCR extraction tool</name>
   <files>
     <create>src/lib/recon/extraction/parse-image-ocr.ts</create>
@@ -651,12 +724,14 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     src/lib/recon/extraction/tools.ts
   </read_first>
   <action>
-    Implement `parseImageOcr(descriptor)` for image descriptors with `demoFixture.rawOcr`.
+    Implement `parseImageOcr(descriptor)` for real image proof files.
+
+    It must call `readProofSource(descriptor)` first. If source mode is `real_file`, run OCR/vision on the actual proof image bytes. For PDFs without usable text, the later agent routing may render a page image and pass that rendered image into this route. If OCR/vision fails, fall back to `demoFixture.rawOcr` only through `readProofSource()` and include fallback warning/timeline metadata.
 
     Return:
 
     - `route: "parse_image_ocr"`.
-    - `rawText` from `demoFixture.rawOcr`.
+    - `rawText` from real OCR/vision output or explicit fallback source.
     - `candidateFinancialPayload.documentType: "remittance_advice"`.
     - `paymentStatus: "ACSC"` when the OCR text contains `PAID`.
     - raw debtor from text after `SENDER`.
@@ -713,7 +788,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add image ocr extraction tool</commit>
 </task>
 
-<task id="7" depends="1,3" type="auto">
+<task id="8" depends="1,4" type="auto">
   <name>Implement manual correction fallback tool</name>
   <files>
     <create>src/lib/recon/extraction/manual-correction.ts</create>
@@ -807,7 +882,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): add manual correction fallback tool</commit>
 </task>
 
-<task id="8" depends="4,5,6,7" type="auto">
+<task id="9" depends="5,6,7,8" type="auto">
   <name>Export the concrete extraction tool registry</name>
   <files>
     <modify>src/lib/recon/extraction/tools.ts</modify>
@@ -865,7 +940,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
   <commit>feat(extraction): wire extraction tool registry</commit>
 </task>
 
-<task id="9" depends="8" type="auto">
+<task id="10" depends="9" type="auto">
   <name>Assert cross-tool Agent 1 boundary contract</name>
   <files>
     <modify>src/lib/recon/extraction/tools.contract.test.ts</modify>
@@ -885,7 +960,8 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     - Every result uses only raw extracted debtor, creditor, and reference fields. It must not include `normalizedName`, `normalized`, `normalized_reference`, or `reconciliationStatus`.
     - Every non-manual route emits at least one evidence span.
     - No tool result contains reconciliation concepts such as `matchScore`, `classification`, `bankTransaction`, `expectedPayment`, `fxScenario`, or `artifact`.
-    - The text, table, and image fixtures choose three different route values when executed through the registry.
+    - The text, table, and image real proof files choose three different route values when executed through the registry.
+    - Fallback mode is explicit: serialized results or timeline metadata must contain `fixture_fallback` when `demoFixture` is used.
 
     These tests protect the architecture rule: Agent 1 extracts, code later normalizes, Agent 2 matches.
   </action>
@@ -939,7 +1015,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     npm exec vitest run src/lib/recon/extraction
     npm exec tsc -- --noEmit
   </verify>
-  <done>Cross-tool contract tests prove the fixture-backed tools emit evidence-backed raw extraction results and do not cross into normalization, matching, classification, or artifacts.</done>
+  <done>Cross-tool contract tests prove the real-file-backed tools emit evidence-backed raw extraction results, expose fallback mode when used, and do not cross into normalization, matching, classification, or artifacts.</done>
   <commit>test(extraction): assert tool boundary contract</commit>
 </task>
 ```
@@ -1036,9 +1112,9 @@ The script should print:
 
 Minimum tests:
 
-- text PDF routes to `parse_pdf_text`;
-- table PDF routes to `parse_pdf_table`;
-- image proof routes to `parse_image_ocr`;
+- real text PDF/plain text files route to `parse_pdf_text`;
+- real table PDF files route to `parse_pdf_table`;
+- real image proof files route to `parse_image_ocr`;
 - low-quality proof routes to `manual_correction`;
 - extraction output validates against schema;
 - missing reference creates warning;

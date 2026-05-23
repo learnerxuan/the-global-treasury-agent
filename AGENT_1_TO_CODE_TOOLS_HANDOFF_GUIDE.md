@@ -8,7 +8,7 @@ Date: 2026-05-23
 
 This guide defines exactly what Agent 1 hands to the next architecture block.
 
-Agent 1 is **Extraction Agent**. It turns messy payment proof files into raw, evidence-backed structured extraction output.
+Agent 1 is **Extraction Agent**. It turns real messy payment proof files into raw, evidence-backed structured extraction output.
 
 Next architecture block is **Code Tools: Parse + Normalize**. It takes parsed expected payments, parsed bank transactions, and Agent 1 proof extractions, then produces clean normalized records for Agent 2 matching.
 
@@ -43,6 +43,8 @@ result.timeline
 
 Code Tools should not depend on internal Agent 1 helper objects such as `ExtractionToolResult`. Tool results are internal to Agent 1 and are assembled into `PaymentProofExtractionOutput` before handoff.
 
+Agent 1 should read actual proof files through `PaymentProofInputDescriptor.storageRef`. `demoFixture` content is fallback/test data only and should not be treated as the primary demo source.
+
 ## Code Tools Input Contract
 
 Code Tools should accept an `InputBatch` or enough data to build one:
@@ -67,6 +69,16 @@ At minimum, Code Tools need:
 - `bankTransactions`: parsed local bank statement transactions from CSV/XLSX.
 - `paymentProofExtractions`: Agent 1 proof extraction outputs.
 - `warnings`: batch-level parser or extraction warnings.
+
+Each proof input should include:
+
+```ts
+storageRef: {
+  kind: "local_path" | "object_storage" | "uploaded_blob";
+  uri: string;
+  sha256?: string | null;
+}
+```
 
 ## Code Tools Responsibilities
 
