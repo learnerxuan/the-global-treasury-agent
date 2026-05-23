@@ -1,0 +1,23 @@
+{
+  "name": "reconpilot-blocks-1-2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --globals",
+    "typecheck": "tsc --noEmit",
+    "demo:extraction": "tsx src/scripts/run-extraction-demo.ts"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "pdf-parse": "^2.4.5",
+    "tesseract.js": "^7.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

@@ -8,5 +8,6 @@ _guide_docx_unzipped/
 node_modules/
 dist/
 build/
+eng.traineddata
 .DS_Store
 Thumbs.db
