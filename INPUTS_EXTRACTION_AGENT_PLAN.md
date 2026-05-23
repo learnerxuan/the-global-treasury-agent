@@ -413,6 +413,228 @@ type TimelineEvent = {
 };
 ```
 
+## Example JSON Formats
+
+These are the concrete JSON shapes to use for fixtures, API responses, and demo output. The TypeScript/Zod schemas above are the source of truth; these examples show what valid data should look like.
+
+### 1. Expected Payment Record JSON
+
+This represents what the SME expects to receive, usually from invoice records, accounts receivable exports, or a payment schedule.
+
+```json
+{
+  "expectedPaymentId": "exp_001",
+  "invoiceNumber": "INV-1001",
+  "issueDate": "2026-05-19",
+  "dueDate": "2026-06-18",
+  "seller": {
+    "name": "ReconPilot Sdn Bhd",
+    "normalizedName": "RECONPILOT"
+  },
+  "buyer": {
+    "name": "Acme Pte Ltd",
+    "normalizedName": "ACME"
+  },
+  "invoiceCurrency": "USD",
+  "amountDue": {
+    "value": "10.00",
+    "currency": "USD"
+  },
+  "expectedSettlementCurrency": "MYR",
+  "paymentReference": {
+    "raw": "INV-1001",
+    "normalized": "INV1001"
+  },
+  "buyerReference": null,
+  "purchaseOrderReference": null,
+  "paymentTerms": "Due within 30 days",
+  "outstandingAmount": {
+    "value": "10.00",
+    "currency": "USD"
+  },
+  "sourceFileId": "expected-payments.csv",
+  "sourceRowNumber": 2,
+  "fieldConfidence": {
+    "invoiceNumber": 1,
+    "amountDue.value": 1,
+    "amountDue.currency": 1,
+    "buyer.name": 1
+  },
+  "evidenceSpans": [
+    {
+      "field": "invoiceNumber",
+      "value": "INV-1001",
+      "confidence": 1,
+      "source": "csv",
+      "evidenceText": "invoice_number=INV-1001",
+      "page": null,
+      "bbox": null,
+      "warnings": []
+    }
+  ],
+  "warnings": []
+}
+```
+
+### 2. Bank Statement Transaction JSON
+
+This represents the actual booked transaction in the local bank account. For incoming customer receipts, the important direction is `CRDT`.
+
+```json
+{
+  "transactionId": "txn_001",
+  "accountId": "MYR_MAIN_ACCOUNT",
+  "bookingDate": "2026-05-20",
+  "valueDate": "2026-05-20",
+  "creditDebitIndicator": "CRDT",
+  "amount": {
+    "value": "42.50",
+    "currency": "MYR"
+  },
+  "counterpartyName": "ACME PTE LTD",
+  "remittanceInfo": "Payment for INV-1001",
+  "bankReference": "BNK-9001",
+  "accountServicerReference": "ASR-20260520-001",
+  "endToEndId": null,
+  "bankTransactionCode": "NTRF",
+  "description": "Foreign inward remittance INV-1001 ACME",
+  "rawDescription": "Foreign inward remittance INV-1001 ACME",
+  "sourceFileId": "maybank-statement.csv",
+  "sourceRowNumber": 4,
+  "warnings": []
+}
+```
+
+### 3. Payment Proof Input Descriptor JSON
+
+This is the pre-extraction file descriptor. It lets the MVP simulate upload handling and extraction routing before real OCR/PDF integrations are added.
+
+```json
+{
+  "fileId": "proof_file_001",
+  "fileName": "wise-transfer-inv-1001.pdf",
+  "mimeType": "application/pdf",
+  "inputKind": "payment_proof",
+  "sizeBytes": 248910,
+  "textLayer": true,
+  "tableLikely": false,
+  "imageQuality": "high",
+  "rawTextFixture": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Date 2026-05-20.",
+  "rawTableFixture": null,
+  "rawOcrFixture": null,
+  "warnings": []
+}
+```
+
+### 4. Payment Proof Extraction Output JSON
+
+This is the most important Agent 1 output. It should look like payment/remittance evidence, not generic OCR text.
+
+```json
+{
+  "proofId": "proof_001",
+  "sourceFileId": "proof_file_001",
+  "documentType": "provider_receipt",
+  "paymentStatus": "paid",
+  "payer": {
+    "name": "Acme Pte Ltd",
+    "normalizedName": "ACME"
+  },
+  "beneficiary": {
+    "name": "ReconPilot Sdn Bhd",
+    "normalizedName": "RECONPILOT"
+  },
+  "paidAmount": {
+    "value": "10.00",
+    "currency": "USD"
+  },
+  "paymentDate": "2026-05-20",
+  "valueDate": null,
+  "bookingDate": null,
+  "reference": {
+    "raw": "INV-1001",
+    "normalized": "INV1001"
+  },
+  "transactionId": "WISE-TRX-88291",
+  "providerOrBankName": "Wise",
+  "invoiceIds": ["INV-1001"],
+  "endToEndId": null,
+  "uetr": null,
+  "feeAmount": null,
+  "netAmount": null,
+  "sourceAmount": {
+    "value": "10.00",
+    "currency": "USD"
+  },
+  "targetAmount": {
+    "value": "42.50",
+    "currency": "MYR"
+  },
+  "fxRate": "4.2500",
+  "fxRateType": "fixed",
+  "remittanceInformation": {
+    "raw": "Payment for INV-1001",
+    "structured": {
+      "invoiceNumber": "INV-1001"
+    }
+  },
+  "rawText": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Date 2026-05-20.",
+  "fieldConfidence": {
+    "payer.name": 0.94,
+    "beneficiary.name": 0.96,
+    "paidAmount.value": 0.99,
+    "paidAmount.currency": 0.99,
+    "paymentDate": 0.98,
+    "reference.raw": 0.97
+  },
+  "evidenceSpans": [
+    {
+      "field": "paidAmount.value",
+      "value": "10.00",
+      "confidence": 0.99,
+      "source": "pdf_text",
+      "evidenceText": "Paid USD 10.00",
+      "page": 1,
+      "bbox": null,
+      "warnings": []
+    },
+    {
+      "field": "reference.raw",
+      "value": "INV-1001",
+      "confidence": 0.97,
+      "source": "pdf_text",
+      "evidenceText": "Reference INV-1001",
+      "page": 1,
+      "bbox": null,
+      "warnings": []
+    }
+  ],
+  "overallConfidence": 0.96,
+  "extractionRoute": "parse_pdf_text",
+  "requiresManualReview": false,
+  "warnings": []
+}
+```
+
+### 5. Agent Timeline Event JSON
+
+This is what makes the demo show that Agent 1 is choosing tools, not just running hidden OCR.
+
+```json
+{
+  "id": "timeline_001",
+  "timestamp": "2026-05-23T08:30:00.000Z",
+  "agent": "Extraction Agent",
+  "action": "Selected extraction route",
+  "toolName": "parse_pdf_text",
+  "inputSummary": "wise-transfer-inv-1001.pdf has a PDF text layer and no table signal",
+  "resultSummary": "Using embedded text extraction before OCR",
+  "reasoning": "Text-layer PDFs provide cleaner field evidence than OCR for this proof type.",
+  "observedConfidence": 0.96,
+  "warnings": []
+}
+```
+
 ## Solo Build Order
 
 ### Step 1: Project Foundation
