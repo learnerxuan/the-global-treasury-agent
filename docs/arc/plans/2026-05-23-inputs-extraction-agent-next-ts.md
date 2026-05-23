@@ -51,6 +51,7 @@ Useful references captured during planning:
 - Do not use the LLM or extraction agent for money math.
 - Do not implement full UBL, Peppol, ISO 20022 XML, accounting ledgers, tax, journal entries, or bank account storage in this phase.
 
+```xml
 <implementation_plan>
   <task id="01">
     <name>Bootstrap the Next.js + TypeScript project foundation</name>
@@ -1046,6 +1047,7 @@ describe("extraction demo model", () => {
     <commit>feat: add extraction demo experience</commit>
   </task>
 </implementation_plan>
+```
 
 ## Suggested Team Split For This Plan
 
