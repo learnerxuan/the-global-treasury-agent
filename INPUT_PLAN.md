@@ -128,7 +128,7 @@ src/lib/recon/parsers/bank-statements.ts
 ```ts
 type CurrencyCode = string; // ISO 4217 uppercase, validated by Zod allowlist
 type IsoDate = string; // YYYY-MM-DD
-type IsoDateTime = string; // full ISO 8601 datetime when source provides it
+type IsoDateTime = string; // full ISO 8601 datetime with timezone offset
 type ReconDate = IsoDate | IsoDateTime;
 
 type MoneyAmount = {
@@ -208,6 +208,7 @@ type RemittanceInformation = {
 - Keep raw values somewhere when normalization changes them.
 - Expected payment records need `reconciliationStatus` so later matching can skip records that are already matched, partially matched, or void.
 - If `exchangeRateInformation.rateType` is `IMPLIED`, then both `sourceAmount` and `targetAmount` must be present.
+- `normalizationMetadata.normalizedAt` must be an ISO 8601 datetime with timezone offset, not a free text string.
 
 ## Schema 1: Expected Payment Record
 
@@ -688,11 +689,17 @@ type NormalizedPaymentProofRecord = {
   };
   aiMetadata: PaymentProofExtractionOutput["aiMetadata"];
   normalizationMetadata: {
-    normalizedAt: string;
+    normalizedAt: IsoDateTime;
     toolsUsed: Array<"normalize_party_name" | "normalize_reference" | "normalize_date">;
     warnings: Warning[];
   };
 };
+```
+
+Zod implementation note:
+
+```ts
+const isoDateTimeSchema = z.string().datetime({ offset: true });
 ```
 
 ## Implementation Order For This File
