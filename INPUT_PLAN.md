@@ -187,9 +187,12 @@ type WarningCode =
   | "INVALID_MONEY_FORMAT"
   | "INVALID_DATE_FORMAT"
   | "INVALID_CURRENCY"
+  | "MISSING_PAID_AMOUNT"
+  | "MISSING_PAYMENT_DATE"
   | "MISSING_PAYMENT_REFERENCE"
   | "MISSING_DEBTOR"
   | "MISSING_CREDITOR"
+  | "LOW_QUALITY_PROOF"
   | "LOW_CONFIDENCE_EXTRACTION"
   | "PAYMENT_NOT_SETTLED"
   | "IMPLIED_FX_MISSING_AMOUNTS";
@@ -871,6 +874,7 @@ Minimum tests:
 - `IMPLIED` exchange rate requires both `sourceAmount` and `targetAmount`.
 - payment status other than `ACSC` requires manual review;
 - parser warning codes include `UNMAPPED_COLUMN`, `AMBIGUOUS_COLUMN_MAPPING`, `MISSING_REQUIRED_COLUMN`, `INVALID_MONEY_FORMAT`, and `LOW_CONFIDENCE_EXTRACTION`;
+- proof extraction warning codes include `MISSING_PAID_AMOUNT`, `MISSING_PAYMENT_DATE`, `MISSING_PAYMENT_REFERENCE`, `MISSING_DEBTOR`, `MISSING_CREDITOR`, and `LOW_QUALITY_PROOF`;
 - `FieldEvidence` includes `originalValue` and `normalizedValue`.
 
 ## Definition Of Done
