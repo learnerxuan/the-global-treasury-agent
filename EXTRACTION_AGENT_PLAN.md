@@ -172,6 +172,10 @@ Define:
 
 ### Step 2: Implement Fixture-Backed Tools
 
+Detailed Arc implementation plan:
+
+[docs/arc/plans/2026-05-23-extraction-agent-step-2-fixture-tools-implementation.md](docs/arc/plans/2026-05-23-extraction-agent-step-2-fixture-tools-implementation.md)
+
 Files:
 
 - `parse-pdf-text.ts`
