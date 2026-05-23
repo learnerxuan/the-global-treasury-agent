@@ -28,7 +28,8 @@ Agent 1 can:
 
 - inspect proof file metadata;
 - decide which extraction tool to call;
-- call one extraction tool;
+- call one or more extraction tools when the first result is weak;
+- observe extraction quality and decide whether to retry with another route or fall back to manual correction;
 - assemble `PaymentProofExtractionOutput`;
 - attach evidence spans;
 - flag manual review;
@@ -51,6 +52,8 @@ goal
 -> choose extraction tool
 -> call tool
 -> observe extracted fields
+-> evaluate result quality
+-> if result is weak, retry with another relevant tool or fall back to manual correction
 -> assemble structured JSON
 -> validate schema
 -> decide whether manual review is required
@@ -77,6 +80,42 @@ Route priority:
 6. Otherwise, use `manual_correction`.
 
 For hackathon speed, keep the `parse_pdf_text` route name. It handles text-layer PDFs and plain text proof files.
+
+## Retry And Fallback Behavior
+
+Agent 1 should not stop after the first tool call when the extracted result is weak.
+
+Result quality is weak when:
+
+- paid amount is missing;
+- payment date is missing;
+- both reference and invoice IDs are missing;
+- debtor or creditor is missing;
+- critical field confidence is below `0.85`;
+- overall confidence would be below `0.85`;
+- payment status is `UNKNOWN`, `PNDG`, `RJCT`, or `CANC`;
+- the parser returns `LOW_QUALITY_PROOF`, `LOW_CONFIDENCE_EXTRACTION`, or missing critical field warnings.
+
+Retry rules:
+
+```text
+PDF text route weak and table signal exists
+-> try parse_pdf_table
+
+PDF text route weak and no text/table signal remains
+-> render page image if available, then try parse_image_ocr
+
+PDF table route weak
+-> try parse_pdf_text, then parse_image_ocr if needed
+
+Image OCR route weak
+-> do not invent values; return low-confidence fields and request manual correction/review
+
+Any route unreadable
+-> manual_correction
+```
+
+Every attempted route must write a timeline event. The final output should include the best valid extraction attempt, plus warnings that explain any failed or skipped attempts.
 
 ## Recommended File Structure
 
@@ -1024,7 +1063,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 
 - Execute this after `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool interfaces exist and compile successfully.
 - If the repository is still docs-only, first scaffold the declared Next.js/TypeScript/Vitest project and implement the schema contract.
-- Keep fixture parsing intentionally boring and deterministic for the demo. The agentic behavior is route choice and observed tool output, not live OCR magic.
+- Keep fallback fixture parsing intentionally boring and deterministic for tests. The primary demo behavior is real file extraction plus visible route choice, retry/fallback decisions, and observed tool output.
 - Step 4 will assemble full `PaymentProofExtractionOutput`, validate against Zod, decide manual review, and write the timeline.
 
 ### Step 3: Implement Timeline
@@ -1050,7 +1089,14 @@ Files:
 Implement:
 
 - route selection;
-- tool call;
+- first tool call;
+- `isExtractionWeak(toolResult)` to check missing critical fields, low confidence, unsettled/unknown payment status, and extraction warnings;
+- retry/fallback routing after observing tool output:
+  - weak `parse_pdf_text` result with table signal -> try `parse_pdf_table`;
+  - weak `parse_pdf_text` or `parse_pdf_table` result with renderable page image -> try `parse_image_ocr`;
+  - weak `parse_image_ocr` result -> keep truthful low-confidence fields and route to manual review/manual correction;
+  - unreadable source -> use `manual_correction`;
+- best-attempt selection that prefers schema-valid outputs with more critical fields and higher confidence;
 - `createDefaultFinancialPayload()` to provide every required `PaymentProofExtractionOutput.financialPayload` key with safe defaults:
   - `documentType: "other"`;
   - `paymentStatus: "UNKNOWN"`;
@@ -1092,6 +1138,8 @@ Implement:
 
 Manual review decision must set `aiMetadata.requiresManualReview` to `true` when `overallConfidence < 0.85`, the route is `manual_correction`, any critical field is missing, payment status is not `ACSC`, or warnings include `LOW_QUALITY_PROOF`, `LOW_CONFIDENCE_EXTRACTION`, or missing critical field codes.
 
+Timeline writing must show every attempted route, observed result quality, retry reason, final selected attempt, and final manual review decision.
+
 ### Step 5: Demo Runner
 
 Files:
@@ -1122,12 +1170,16 @@ Minimum tests:
 - proof with explicit FX extracts `exchangeRateInformation`;
 - proof without FX sets `exchangeRateInformation` to `null`;
 - proof with source and target amount may produce `IMPLIED` FX if implemented.
+- weak PDF text extraction retries table or OCR route before final output;
+- weak OCR extraction does not invent values and triggers manual correction/review;
+- timeline records each attempted extraction route and why the final result was selected.
 
 ## Definition Of Done
 
 Agent 1 is complete when:
 
 - it chooses different tools for different proof types;
+- it can retry/fallback based on observed extraction quality;
 - every output validates as `PaymentProofExtractionOutput`;
 - every important field has evidence and confidence;
 - messy documents can produce truthful `null` fields with warnings;
