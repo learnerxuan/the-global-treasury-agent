@@ -1,66 +1,97 @@
-# ReconPilot Solo Build Plan: Inputs + Extraction Agent
+# ReconPilot Input Schema Contract
 
 Status: ready for implementation  
 Owner: solo developer  
-Stack: Next.js App Router, TypeScript, Zod, Vitest  
-Scope: only architecture blocks 1 and 2 from the ReconPilot diagram  
+Stack: Next.js App Router, TypeScript, Zod, JSON Schema  
+Scope: architecture block 1, plus the structured data contract consumed by block 2  
 Date: 2026-05-23
 
-## What This Plan Covers
+## Purpose
 
-This plan only covers:
+This file defines the data formats for ReconPilot's first build phase.
 
-1. **Inputs**
-   - Expected payment records: CSV/XLSX-style invoice or receivables rows.
-   - Payment proofs: image, PDF, text, or table-like proof descriptors.
-   - Local bank statement: CSV/XLSX-style booked bank transaction rows.
+The goal is not to implement full ISO 20022 XML messages. The goal is to produce **ISO 20022-aligned JSON** that uses banking-standard concepts while staying practical for a 24-48 hour hackathon.
 
-2. **Agent 1: Extraction Agent**
-   - Inspects each payment proof.
-   - Chooses the best extraction route.
-   - Calls one extraction tool.
-   - Produces structured proof JSON with confidence and evidence.
-   - Flags low-confidence or ambiguous fields for manual correction.
-   - Writes timeline events so the demo visibly shows agentic behavior.
+Use this file as the source of truth for:
 
-This plan does **not** cover:
+- expected payment records;
+- bank statement transactions;
+- payment proof input descriptors;
+- payment proof extraction outputs;
+- shared financial primitives.
 
-- FX rate lookup.
-- Candidate matching.
-- Reconciliation scoring.
-- Auto-match / likely-match / unmatched classification.
-- Accounting journal entries.
-- Report generation.
-- Email generation.
-- Full dashboard polish.
+The Extraction Agent implementation plan has been moved to:
 
-The only goal is to make ReconPilot able to say:
+[EXTRACTION_AGENT_PLAN.md](EXTRACTION_AGENT_PLAN.md)
 
-> "Here are the expected payment records, here are the bank rows, and here is a finance-grade structured extraction from messy payment proofs."
+## What This File Covers
 
-## Why The Data Schema Matters Most
+This schema contract covers:
 
-The schema is the foundation of the project. If the schema is weak, the rest of ReconPilot becomes a nice-looking demo with unreliable data.
+1. **Expected Payment Records**
+   - Invoice, accounts receivable, or payment schedule rows.
+   - Describes what the SME expects to receive.
 
-For this build, the extracted data must look like real payment and reconciliation data, not generic OCR output. Use:
+2. **Bank Statement Transactions**
+   - Local booked bank transactions.
+   - Describes what actually entered or left the bank account.
 
-- UBL / Peppol / EN16931-inspired fields for expected payments.
-- ISO 20022 camt.053-inspired fields for bank statement transactions.
-- ISO 20022 and payment-provider-inspired fields for payment proof evidence.
-- ISO 4217 currency codes.
-- ISO 8601 dates.
-- Field-level confidence and source evidence for every important extracted value.
+3. **Payment Proof Input Descriptors**
+   - Uploaded proof metadata before extraction.
+   - Helps Agent 1 choose a route.
+
+4. **Payment Proof Extraction Outputs**
+   - Structured, evidence-backed payment data extracted from proof files.
+   - This is the most important output of Agent 1.
+
+This file does **not** cover:
+
+- reconciliation matching;
+- FX scenario comparison;
+- scoring;
+- report generation;
+- accounting journal entries;
+- email generation.
+
+## Standards Positioning
+
+Pitch wording:
+
+> ReconPilot maps messy payment proofs into an ISO 20022-aligned JSON payload with source evidence and confidence metadata.
+
+Avoid overclaiming:
+
+> Do not say "fully ISO 20022-compliant" unless we implement exact ISO 20022 message definitions such as `camt.053`, `pacs.008`, or `pain.001`.
 
 ## Standards To Follow
 
-- Expected payments: Peppol/UBL-style invoice and receivable fields.
-- Bank statement rows: ISO 20022 camt.053-style booked account entries.
-- Payment proofs: ISO 20022/provider receipt-style payment evidence.
-- Currency: ISO 4217 uppercase alpha codes such as `USD`, `MYR`, `SGD`.
-- Date: ISO 8601 calendar date format, `YYYY-MM-DD`.
-- Amounts: decimal strings in schemas, not floating-point numbers for money logic.
-- References: preserve raw references and also store normalized references.
-- Parties: preserve raw names and also store normalized names for later matching.
+- **ISO 20022-inspired parties**
+  - `creditor` = party receiving money.
+  - `debtor` = party sending money.
+
+- **ISO 20022-inspired bank direction**
+  - `CRDT` = credit to the account.
+  - `DBIT` = debit from the account.
+
+- **ISO 20022-inspired remittance**
+  - `remittanceInformation.raw` maps to unstructured remittance information.
+  - `remittanceInformation.structured` maps to parsed structured remittance details.
+
+- **ISO 4217**
+  - Currency codes must be uppercase alpha codes such as `USD`, `MYR`, `SGD`.
+
+- **ISO 8601**
+  - Invoice-style dates may be `YYYY-MM-DD`.
+  - Bank/payment events may use `YYYY-MM-DD` for MVP fixtures or full datetime when available.
+
+- **Money**
+  - Store money values as decimal strings, not floats.
+
+- **FX**
+  - If the input proof contains an exchange rate, extract it.
+  - If the proof only contains source and target amounts, an implied rate may be computed later, but must be labelled as `IMPLIED`.
+  - If no FX data exists in the input, keep `exchangeRateInformation` as `null`.
+  - Never pretend fetched reference FX is the actual bank-applied rate.
 
 Reference sources:
 
@@ -74,366 +105,162 @@ Reference sources:
 - PayPal transaction fields: https://developer.paypal.com/docs/api/transaction-search/v1/
 - Stripe balance transaction fields: https://docs.stripe.com/api/balance_transactions/object
 
-## Proposed File Structure
+## Recommended File Structure
 
 ```text
-package.json
-tsconfig.json
-next.config.ts
-vitest.config.ts
-
-src/app/page.tsx
-src/app/api/recon/demo/route.ts
-src/app/api/recon/extract/route.ts
-
 src/lib/recon/schemas.ts
 src/lib/recon/types.ts
 src/lib/recon/normalizers.ts
-src/lib/recon/input-descriptors.ts
-src/lib/recon/timeline.ts
 
 src/lib/recon/fixtures/expected-payment-rows.ts
 src/lib/recon/fixtures/bank-statement-rows.ts
 src/lib/recon/fixtures/payment-proof-descriptors.ts
-src/lib/recon/fixtures/index.ts
+src/lib/recon/fixtures/payment-proof-extractions.ts
 
 src/lib/recon/parsers/expected-payments.ts
 src/lib/recon/parsers/bank-statements.ts
-
-src/lib/recon/extraction/tools.ts
-src/lib/recon/extraction/ocr-image.ts
-src/lib/recon/extraction/parse-pdf-text.ts
-src/lib/recon/extraction/parse-pdf-tables.ts
-src/lib/recon/extraction/request-manual-correction.ts
-src/lib/recon/extraction/extraction-agent.ts
-
-src/scripts/run-extraction-demo.ts
 ```
 
-## Core Schema Contract
+## Shared Schema Primitives
 
-Implement schemas in `src/lib/recon/schemas.ts` using Zod, and export inferred TypeScript types from `src/lib/recon/types.ts`.
-
-### Shared Types
+### TypeScript Target
 
 ```ts
 type CurrencyCode = string; // ISO 4217 uppercase, validated by Zod allowlist
 type IsoDate = string; // YYYY-MM-DD
+type IsoDateTime = string; // full ISO 8601 datetime when source provides it
+type ReconDate = IsoDate | IsoDateTime;
 
 type MoneyAmount = {
-  value: string; // decimal string, e.g. "42.50"
+  value: string; // non-negative decimal string, e.g. "42.50"
   currency: CurrencyCode;
 };
 
-type Party = {
+type NormalizedParty = {
   name: string | null;
-  normalizedName?: string | null;
+  normalizedName: string | null;
 };
 
-type ReferenceValue = {
+type AccountIdentifier = {
+  iban: string | null;
+  swiftBic: string | null;
+  localAccountId: string | null;
+  maskedAccount: string | null;
+};
+
+type PaymentReference = {
   raw: string | null;
-  normalized?: string | null;
+  normalized: string | null;
+};
+
+type ExchangeRateInformation = {
+  unitCurrency: CurrencyCode;
+  quotedCurrency: CurrencyCode;
+  exchangeRate: string | null;
+  rateType: "AGREED" | "SPOT" | "ACTUAL" | "INSTRUCTED" | "IMPLIED" | "UNKNOWN";
+  source: "payment_proof" | "bank_statement" | "manual" | "computed_implied" | "not_provided";
+  contractId: string | null;
+  evidenceText: string | null;
+};
+
+type Warning = {
+  code: string; // SCREAMING_SNAKE_CASE
+  message: string;
+  field: string | null;
 };
 
 type FieldEvidence = {
   field: string;
-  value: unknown;
+  value: string | null;
   confidence: number; // 0 to 1
-  source: "ocr" | "pdf_text" | "pdf_table" | "manual" | "csv" | "xlsx" | "fixture";
+  source: "csv" | "xlsx" | "pdf_text" | "pdf_table" | "image_ocr" | "manual" | "fixture";
   evidenceText: string | null;
-  page?: number | null;
-  bbox?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+  page: number | null;
+  bbox: [number, number, number, number] | null;
+  warnings: Warning[];
+};
+
+type RemittanceInformation = {
+  raw: string | null;
+  structured: {
+    invoiceNumber?: string | null;
+    creditorReference?: string | null;
+    additionalInfo?: string | null;
   } | null;
-  warnings: string[];
 };
 ```
 
-### Expected Payment Record
+### Key Rules
 
-Use this for invoice CSV/XLSX, receivables export, or payment schedule rows.
+- `PaymentReference.raw` and `PaymentReference.normalized` must allow `null` because missing reference is an MVP scenario.
+- `NormalizedParty.name` must allow `null` because OCR may fail to identify debtor or creditor.
+- Money amounts should be non-negative. Use `creditDebitIndicator` for bank direction.
+- For hackathon fixtures, bank dates may be bare dates. If full datetimes are available, preserve them.
+- Keep raw values somewhere when normalization changes them.
 
-Required fields:
+## Schema 1: Expected Payment Record
 
-| Field | Type | Why it matters |
-| --- | --- | --- |
-| `expectedPaymentId` | string | Stable internal ID |
-| `invoiceNumber` | string | Main expected-payment reference |
-| `issueDate` | ISO date | Invoice date |
-| `dueDate` | ISO date or null | Useful later for date proximity |
-| `seller` | Party | Our SME / payee |
-| `buyer` | Party | Customer / payer |
-| `invoiceCurrency` | ISO 4217 | Currency owed, e.g. `USD` |
-| `amountDue` | MoneyAmount | Amount owed |
-| `expectedSettlementCurrency` | ISO 4217 | Local receipt currency, e.g. `MYR` |
-| `paymentReference` | ReferenceValue | Reference expected on proof/bank row |
-| `sourceFileId` | string | Input file provenance |
-| `fieldConfidence` | record | Deterministic rows can be `1` |
-| `evidenceSpans` | FieldEvidence[] | Source evidence |
-| `warnings` | string[] | Missing/uncertain field notes |
+This is what the SME expects to receive.
 
-Optional useful fields:
+Use `creditor` and `debtor`, not `seller` and `buyer`, so the vocabulary stays aligned with payment systems.
 
-| Field | Type |
-| --- | --- |
-| `buyerReference` | ReferenceValue |
-| `purchaseOrderReference` | ReferenceValue |
-| `paymentTerms` | string |
-| `outstandingAmount` | MoneyAmount |
-| `sourceRowNumber` | number |
-
-Type target:
+### TypeScript Target
 
 ```ts
 type ExpectedPaymentRecord = {
+  schemaVersion: "1.0.0";
   expectedPaymentId: string;
   invoiceNumber: string;
   issueDate: IsoDate;
-  dueDate?: IsoDate | null;
-  seller: Party;
-  buyer: Party;
+  dueDate: IsoDate | null;
+  creditor: NormalizedParty;
+  debtor: NormalizedParty;
+  creditorAccount: AccountIdentifier | null;
+  debtorAccount: AccountIdentifier | null;
   invoiceCurrency: CurrencyCode;
   amountDue: MoneyAmount;
   expectedSettlementCurrency: CurrencyCode;
-  paymentReference: ReferenceValue;
-  buyerReference?: ReferenceValue | null;
-  purchaseOrderReference?: ReferenceValue | null;
-  paymentTerms?: string | null;
-  outstandingAmount?: MoneyAmount | null;
+  paymentReference: PaymentReference;
+  debtorReference: PaymentReference | null;
+  purchaseOrderReference: PaymentReference | null;
+  paymentTerms: string | null;
+  outstandingAmount: MoneyAmount | null;
   sourceFileId: string;
-  sourceRowNumber?: number;
+  sourceRowNumber: number | null;
   fieldConfidence: Record<string, number>;
   evidenceSpans: FieldEvidence[];
-  warnings: string[];
+  warnings: Warning[];
 };
 ```
 
-### Bank Statement Transaction
-
-Use this for local bank statement rows. It should be inspired by ISO 20022 camt.053, but simplified for the MVP.
-
-Required fields:
-
-| Field | Type | Why it matters |
-| --- | --- | --- |
-| `transactionId` | string | Bank ID or generated deterministic ID |
-| `accountId` | string | Account receiving funds |
-| `bookingDate` | ISO date | Date bank posted transaction |
-| `creditDebitIndicator` | `CRDT` or `DBIT` | Direction without signed amounts |
-| `amount` | MoneyAmount | Local received or paid amount |
-| `description` | string | Raw bank narrative |
-| `sourceFileId` | string | Input file provenance |
-| `warnings` | string[] | Missing/uncertain field notes |
-
-Optional useful fields:
-
-| Field | Type |
-| --- | --- |
-| `valueDate` | ISO date |
-| `counterpartyName` | string |
-| `remittanceInfo` | string |
-| `bankReference` | string |
-| `accountServicerReference` | string |
-| `endToEndId` | string |
-| `bankTransactionCode` | string |
-| `rawDescription` | string |
-| `sourceRowNumber` | number |
-
-Type target:
-
-```ts
-type BankStatementTransaction = {
-  transactionId: string;
-  accountId: string;
-  bookingDate: IsoDate;
-  valueDate?: IsoDate | null;
-  creditDebitIndicator: "CRDT" | "DBIT";
-  amount: MoneyAmount;
-  counterpartyName?: string | null;
-  remittanceInfo?: string | null;
-  bankReference?: string | null;
-  accountServicerReference?: string | null;
-  endToEndId?: string | null;
-  bankTransactionCode?: string | null;
-  description: string;
-  rawDescription?: string | null;
-  sourceFileId: string;
-  sourceRowNumber?: number;
-  warnings: string[];
-};
-```
-
-Rules:
-
-- Store amount as positive.
-- Use `creditDebitIndicator` for direction.
-- Do not treat debit rows as customer receipts later.
-- Generate deterministic transaction ID if the bank file has no ID.
-
-### Payment Proof Extraction
-
-This is the most important schema for block 2. It should look like structured payment/remittance evidence, not OCR text.
-
-Required fields:
-
-| Field | Type | Why it matters |
-| --- | --- | --- |
-| `proofId` | string | Stable proof ID |
-| `sourceFileId` | string | Uploaded file provenance |
-| `documentType` | enum | Proof category |
-| `paymentStatus` | enum | Paid/pending/failed/reversed/unknown |
-| `payer` | Party | Sender/customer/debtor |
-| `beneficiary` | Party | Receiver/company/creditor |
-| `paidAmount` | MoneyAmount or null | Paid source amount |
-| `paymentDate` | ISO date or null | Payment initiation/confirmation date |
-| `reference` | ReferenceValue | Invoice/payment/remittance reference |
-| `invoiceIds` | string[] | Invoice IDs found in proof |
-| `rawText` | string | Extracted text used by agent |
-| `fieldConfidence` | record | Per-field confidence |
-| `evidenceSpans` | FieldEvidence[] | Field-level source evidence |
-| `overallConfidence` | number | 0 to 1 |
-| `extractionRoute` | enum | Tool chosen by agent |
-| `requiresManualReview` | boolean | Whether extraction is unsafe |
-| `warnings` | string[] | Missing/uncertain field notes |
-
-Optional useful fields:
-
-| Field | Type |
-| --- | --- |
-| `valueDate` | ISO date |
-| `bookingDate` | ISO date |
-| `transactionId` | string |
-| `providerOrBankName` | string |
-| `endToEndId` | string |
-| `uetr` | string |
-| `feeAmount` | MoneyAmount |
-| `netAmount` | MoneyAmount |
-| `sourceAmount` | MoneyAmount |
-| `targetAmount` | MoneyAmount |
-| `fxRate` | decimal string |
-| `fxRateType` | `fixed`, `floating`, `implied`, or `unknown` |
-| `remittanceInformation.raw` | string |
-| `remittanceInformation.structured` | record |
-
-Type target:
-
-```ts
-type PaymentProofExtraction = {
-  proofId: string;
-  sourceFileId: string;
-  documentType:
-    | "payment_proof"
-    | "remittance_advice"
-    | "bank_receipt"
-    | "provider_receipt"
-    | "unknown";
-  paymentStatus: "paid" | "pending" | "failed" | "reversed" | "unknown";
-  payer: Party;
-  beneficiary: Party;
-  paidAmount: MoneyAmount | null;
-  paymentDate: IsoDate | null;
-  valueDate?: IsoDate | null;
-  bookingDate?: IsoDate | null;
-  reference: ReferenceValue;
-  transactionId?: string | null;
-  providerOrBankName?: string | null;
-  invoiceIds: string[];
-  endToEndId?: string | null;
-  uetr?: string | null;
-  feeAmount?: MoneyAmount | null;
-  netAmount?: MoneyAmount | null;
-  sourceAmount?: MoneyAmount | null;
-  targetAmount?: MoneyAmount | null;
-  fxRate?: string | null;
-  fxRateType?: "fixed" | "floating" | "implied" | "unknown";
-  remittanceInformation?: {
-    raw: string | null;
-    structured: Record<string, string>;
-  };
-  rawText: string;
-  fieldConfidence: Record<string, number>;
-  evidenceSpans: FieldEvidence[];
-  overallConfidence: number;
-  extractionRoute: "ocr_image" | "parse_pdf_text" | "parse_pdf_tables" | "manual_correction";
-  requiresManualReview: boolean;
-  warnings: string[];
-};
-```
-
-Manual review is required when:
-
-- `overallConfidence < 0.85`.
-- `paidAmount` is missing.
-- `paymentDate` is missing.
-- Both `reference.raw` and `invoiceIds` are missing.
-- Payer or beneficiary is missing.
-- The proof route is `manual_correction`.
-- `paymentStatus` is not `paid`.
-
-### Input File Descriptor
-
-Use this instead of real upload handling first. It lets the hackathon demo work with fixtures before file upload is built.
-
-```ts
-type InputFileDescriptor = {
-  fileId: string;
-  fileName: string;
-  mimeType: string;
-  inputKind: "expected_payments" | "payment_proof" | "bank_statement";
-  sizeBytes?: number;
-  textLayer?: boolean;
-  tableLikely?: boolean;
-  imageQuality?: "high" | "medium" | "low";
-  rawTextFixture?: string;
-  rawTableFixture?: string[][];
-  rawOcrFixture?: string;
-  warnings: string[];
-};
-```
-
-### Timeline Event
-
-The timeline is how the demo proves the extraction is agentic.
-
-```ts
-type TimelineEvent = {
-  id: string;
-  timestamp: string;
-  agent: "Extraction Agent" | "Code Tools";
-  action: string;
-  toolName?: "ocr_image" | "parse_pdf_text" | "parse_pdf_tables" | "manual_correction";
-  inputSummary: string;
-  resultSummary: string;
-  reasoning: string;
-  observedConfidence?: number;
-  warnings: string[];
-};
-```
-
-## Example JSON Formats
-
-These are the concrete JSON shapes to use for fixtures, API responses, and demo output. The TypeScript/Zod schemas above are the source of truth; these examples show what valid data should look like.
-
-### 1. Expected Payment Record JSON
-
-This represents what the SME expects to receive, usually from invoice records, accounts receivable exports, or a payment schedule.
+### Example JSON
 
 ```json
 {
+  "schemaVersion": "1.0.0",
   "expectedPaymentId": "exp_001",
   "invoiceNumber": "INV-1001",
   "issueDate": "2026-05-19",
   "dueDate": "2026-06-18",
-  "seller": {
+  "creditor": {
     "name": "ReconPilot Sdn Bhd",
     "normalizedName": "RECONPILOT"
   },
-  "buyer": {
+  "debtor": {
     "name": "Acme Pte Ltd",
     "normalizedName": "ACME"
+  },
+  "creditorAccount": {
+    "iban": null,
+    "swiftBic": null,
+    "localAccountId": "MYR_MAIN_ACCOUNT",
+    "maskedAccount": "****7788"
+  },
+  "debtorAccount": {
+    "iban": null,
+    "swiftBic": null,
+    "localAccountId": null,
+    "maskedAccount": null
   },
   "invoiceCurrency": "USD",
   "amountDue": {
@@ -445,7 +272,7 @@ This represents what the SME expects to receive, usually from invoice records, a
     "raw": "INV-1001",
     "normalized": "INV1001"
   },
-  "buyerReference": null,
+  "debtorReference": null,
   "purchaseOrderReference": null,
   "paymentTerms": "Due within 30 days",
   "outstandingAmount": {
@@ -458,7 +285,7 @@ This represents what the SME expects to receive, usually from invoice records, a
     "invoiceNumber": 1,
     "amountDue.value": 1,
     "amountDue.currency": 1,
-    "buyer.name": 1
+    "debtor.name": 1
   },
   "evidenceSpans": [
     {
@@ -476,13 +303,56 @@ This represents what the SME expects to receive, usually from invoice records, a
 }
 ```
 
-### 2. Bank Statement Transaction JSON
+## Schema 2: Bank Statement Transaction
 
-This represents the actual booked transaction in the local bank account. For incoming customer receipts, the important direction is `CRDT`.
+This is the actual transaction booked by the bank.
+
+For incoming receipts:
+
+- `creditDebitIndicator` is `CRDT`.
+- `debtorName` is the sender/payer.
+- `creditorName` is our SME if known.
+
+For outgoing payments:
+
+- `creditDebitIndicator` is `DBIT`.
+- `creditorName` is the receiving party if known.
+
+### TypeScript Target
+
+```ts
+type BankStatementTransaction = {
+  schemaVersion: "1.0.0";
+  internalTxId: string;
+  accountId: string;
+  bookingDate: ReconDate;
+  valueDate: ReconDate | null;
+  creditDebitIndicator: "CRDT" | "DBIT";
+  amount: MoneyAmount;
+  acctSvcrRef: string | null;
+  endToEndId: string | null;
+  txId: string | null;
+  debtorName: string | null;
+  debtorNormalizedName: string | null;
+  debtorAccount: AccountIdentifier | null;
+  creditorName: string | null;
+  creditorNormalizedName: string | null;
+  creditorAccount: AccountIdentifier | null;
+  remittanceInformation: RemittanceInformation;
+  description: string | null;
+  rawDescription: string | null;
+  sourceFileId: string;
+  sourceRowNumber: number | null;
+  warnings: Warning[];
+};
+```
+
+### Example JSON
 
 ```json
 {
-  "transactionId": "txn_001",
+  "schemaVersion": "1.0.0",
+  "internalTxId": "txn_001",
   "accountId": "MYR_MAIN_ACCOUNT",
   "bookingDate": "2026-05-20",
   "valueDate": "2026-05-20",
@@ -491,12 +361,31 @@ This represents the actual booked transaction in the local bank account. For inc
     "value": "42.50",
     "currency": "MYR"
   },
-  "counterpartyName": "ACME PTE LTD",
-  "remittanceInfo": "Payment for INV-1001",
-  "bankReference": "BNK-9001",
-  "accountServicerReference": "ASR-20260520-001",
+  "acctSvcrRef": "BNK-9001",
   "endToEndId": null,
-  "bankTransactionCode": "NTRF",
+  "txId": null,
+  "debtorName": "ACME PTE LTD",
+  "debtorNormalizedName": "ACME",
+  "debtorAccount": {
+    "iban": null,
+    "swiftBic": null,
+    "localAccountId": null,
+    "maskedAccount": null
+  },
+  "creditorName": "ReconPilot Sdn Bhd",
+  "creditorNormalizedName": "RECONPILOT",
+  "creditorAccount": {
+    "iban": null,
+    "swiftBic": null,
+    "localAccountId": "MYR_MAIN_ACCOUNT",
+    "maskedAccount": "****7788"
+  },
+  "remittanceInformation": {
+    "raw": "Payment for INV-1001",
+    "structured": {
+      "invoiceNumber": "INV-1001"
+    }
+  },
   "description": "Foreign inward remittance INV-1001 ACME",
   "rawDescription": "Foreign inward remittance INV-1001 ACME",
   "sourceFileId": "maybank-statement.csv",
@@ -505,12 +394,41 @@ This represents the actual booked transaction in the local bank account. For inc
 }
 ```
 
-### 3. Payment Proof Input Descriptor JSON
+## Schema 3: Payment Proof Input Descriptor
 
-This is the pre-extraction file descriptor. It lets the MVP simulate upload handling and extraction routing before real OCR/PDF integrations are added.
+This describes an uploaded proof before extraction. It is not yet a financial record.
+
+### TypeScript Target
+
+```ts
+type PaymentProofInputDescriptor = {
+  schemaVersion: "1.0.0";
+  fileId: string;
+  fileName: string;
+  mimeType:
+    | "application/pdf"
+    | "image/jpeg"
+    | "image/png"
+    | "image/webp"
+    | "image/tiff"
+    | "text/plain";
+  inputKind: "payment_proof";
+  sizeBytes: number | null;
+  textLayer: boolean;
+  tableLikely: boolean;
+  imageQuality: "high" | "medium" | "low" | "unknown";
+  rawTextFixture: string | null;
+  rawTableFixture: string[][] | null;
+  rawOcrFixture: string | null;
+  warnings: Warning[];
+};
+```
+
+### Example JSON
 
 ```json
 {
+  "schemaVersion": "1.0.0",
   "fileId": "proof_file_001",
   "fileName": "wise-transfer-inv-1001.pdf",
   "mimeType": "application/pdf",
@@ -519,431 +437,249 @@ This is the pre-extraction file descriptor. It lets the MVP simulate upload hand
   "textLayer": true,
   "tableLikely": false,
   "imageQuality": "high",
-  "rawTextFixture": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Date 2026-05-20.",
+  "rawTextFixture": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Exchange rate: 1 USD = 4.2500 MYR. Date 2026-05-20.",
   "rawTableFixture": null,
   "rawOcrFixture": null,
   "warnings": []
 }
 ```
 
-### 4. Payment Proof Extraction Output JSON
+## Schema 4: Payment Proof Extraction Output
 
-This is the most important Agent 1 output. It should look like payment/remittance evidence, not generic OCR text.
+This is the main output of Agent 1.
 
-```json
-{
-  "proofId": "proof_001",
-  "sourceFileId": "proof_file_001",
-  "documentType": "provider_receipt",
-  "paymentStatus": "paid",
-  "payer": {
-    "name": "Acme Pte Ltd",
-    "normalizedName": "ACME"
-  },
-  "beneficiary": {
-    "name": "ReconPilot Sdn Bhd",
-    "normalizedName": "RECONPILOT"
-  },
-  "paidAmount": {
-    "value": "10.00",
-    "currency": "USD"
-  },
-  "paymentDate": "2026-05-20",
-  "valueDate": null,
-  "bookingDate": null,
-  "reference": {
-    "raw": "INV-1001",
-    "normalized": "INV1001"
-  },
-  "transactionId": "WISE-TRX-88291",
-  "providerOrBankName": "Wise",
-  "invoiceIds": ["INV-1001"],
-  "endToEndId": null,
-  "uetr": null,
-  "feeAmount": null,
-  "netAmount": null,
-  "sourceAmount": {
-    "value": "10.00",
-    "currency": "USD"
-  },
-  "targetAmount": {
-    "value": "42.50",
-    "currency": "MYR"
-  },
-  "fxRate": "4.2500",
-  "fxRateType": "fixed",
-  "remittanceInformation": {
-    "raw": "Payment for INV-1001",
-    "structured": {
-      "invoiceNumber": "INV-1001"
-    }
-  },
-  "rawText": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Date 2026-05-20.",
-  "fieldConfidence": {
-    "payer.name": 0.94,
-    "beneficiary.name": 0.96,
-    "paidAmount.value": 0.99,
-    "paidAmount.currency": 0.99,
-    "paymentDate": 0.98,
-    "reference.raw": 0.97
-  },
-  "evidenceSpans": [
-    {
-      "field": "paidAmount.value",
-      "value": "10.00",
-      "confidence": 0.99,
-      "source": "pdf_text",
-      "evidenceText": "Paid USD 10.00",
-      "page": 1,
-      "bbox": null,
-      "warnings": []
-    },
-    {
-      "field": "reference.raw",
-      "value": "INV-1001",
-      "confidence": 0.97,
-      "source": "pdf_text",
-      "evidenceText": "Reference INV-1001",
-      "page": 1,
-      "bbox": null,
-      "warnings": []
-    }
-  ],
-  "overallConfidence": 0.96,
-  "extractionRoute": "parse_pdf_text",
-  "requiresManualReview": false,
-  "warnings": []
-}
-```
+It separates the financial payload from AI-specific extraction metadata:
 
-### 5. Agent Timeline Event JSON
+- `financialPayload` contains ISO-aligned payment data.
+- `aiMetadata` contains confidence, route, evidence spans, and manual review state.
 
-This is what makes the demo show that Agent 1 is choosing tools, not just running hidden OCR.
-
-```json
-{
-  "id": "timeline_001",
-  "timestamp": "2026-05-23T08:30:00.000Z",
-  "agent": "Extraction Agent",
-  "action": "Selected extraction route",
-  "toolName": "parse_pdf_text",
-  "inputSummary": "wise-transfer-inv-1001.pdf has a PDF text layer and no table signal",
-  "resultSummary": "Using embedded text extraction before OCR",
-  "reasoning": "Text-layer PDFs provide cleaner field evidence than OCR for this proof type.",
-  "observedConfidence": 0.96,
-  "warnings": []
-}
-```
-
-## Solo Build Order
-
-### Step 1: Project Foundation
-
-Goal: create the minimum Next.js + TypeScript base.
-
-Files:
-
-- `package.json`
-- `tsconfig.json`
-- `next.config.ts`
-- `vitest.config.ts`
-- `src/app/page.tsx`
-
-Install:
-
-```bash
-npm install next react react-dom zod
-npm install -D typescript vitest tsx @types/node @types/react @types/react-dom
-```
-
-Scripts:
-
-```json
-{
-  "dev": "next dev",
-  "build": "next build",
-  "typecheck": "tsc --noEmit",
-  "test": "vitest run",
-  "test:watch": "vitest",
-  "demo:extract": "tsx src/scripts/run-extraction-demo.ts"
-}
-```
-
-Done when:
-
-- `npm run typecheck` works.
-- `npm test` works.
-- The app has one simple page saying `ReconPilot Inputs + Extraction Agent`.
-
-### Step 2: Data Schemas
-
-Goal: implement the schema contract before building any parsing logic.
-
-Files:
-
-- `src/lib/recon/schemas.ts`
-- `src/lib/recon/types.ts`
-- `src/lib/recon/schemas.test.ts`
-
-Implementation:
-
-- Add Zod schemas for shared types.
-- Add `expectedPaymentRecordSchema`.
-- Add `bankStatementTransactionSchema`.
-- Add `paymentProofExtractionSchema`.
-- Add `inputFileDescriptorSchema`.
-- Add `timelineEventSchema`.
-- Export inferred TypeScript types.
-
-Tests:
-
-- Valid expected payment record passes.
-- Valid bank transaction passes.
-- Valid payment proof extraction passes.
-- Bad currency fails.
-- Bad date fails.
-- Confidence outside `0..1` fails.
-- Missing critical proof fields can be represented as `null`, but must create warnings/manual review.
-
-This is the most important step. Do not move on until it is clean.
-
-### Step 3: Normalizers
-
-Goal: make raw input rows consistent before validation.
-
-Files:
-
-- `src/lib/recon/normalizers.ts`
-- `src/lib/recon/normalizers.test.ts`
-
-Implement:
-
-- `normalizeCurrency(input)`
-- `normalizeIsoDate(input)`
-- `normalizeDecimalAmount(input)`
-- `normalizeReference(input)`
-- `normalizePartyName(input)`
-- `normalizeCreditDebitIndicator(input)`
-- `makeDeterministicTransactionId(row)`
-
-Rules:
-
-- Reject ambiguous date formats unless a locale is explicitly known.
-- Convert currencies to uppercase ISO codes.
-- Convert money to decimal strings.
-- Preserve raw values somewhere else; normalizers only create comparable versions.
-
-### Step 4: Demo Fixtures
-
-Goal: create stable demo input data for blocks 1 and 2.
-
-Files:
-
-- `src/lib/recon/fixtures/expected-payment-rows.ts`
-- `src/lib/recon/fixtures/bank-statement-rows.ts`
-- `src/lib/recon/fixtures/payment-proof-descriptors.ts`
-- `src/lib/recon/fixtures/index.ts`
-
-Create:
-
-- 3 expected payment rows.
-- 3 bank statement rows.
-- 4 payment proof descriptors.
-
-Proof descriptors must force different routes:
-
-- One scanned image -> `ocr_image`.
-- One digital PDF with text layer -> `parse_pdf_text`.
-- One table PDF/remittance advice -> `parse_pdf_tables`.
-- One low-quality ambiguous proof -> `manual_correction`.
-
-Done when:
-
-- Fixtures include all three input groups.
-- Proof fixtures visibly prove Agent 1 can choose different tools.
-
-### Step 5: Input Parsers
-
-Goal: turn expected payment rows and bank rows into validated internal records.
-
-Files:
-
-- `src/lib/recon/parsers/expected-payments.ts`
-- `src/lib/recon/parsers/bank-statements.ts`
-- parser tests
-
-Expected payment parser:
-
-- Accept CSV/XLSX-like object rows.
-- Map common column names into `ExpectedPaymentRecord`.
-- Normalize date, currency, amount, reference, and names.
-- Add field confidence and evidence spans.
-- Validate through Zod.
-
-Bank statement parser:
-
-- Accept CSV/XLSX-like object rows.
-- Map common bank columns into `BankStatementTransaction`.
-- Normalize direction to `CRDT` or `DBIT`.
-- Store amount as positive decimal string.
-- Generate deterministic transaction ID if missing.
-- Preserve bank description.
-- Validate through Zod.
-
-Do not parse real binary XLSX in this step. Use object rows first.
-
-### Step 6: Extraction Tools
-
-Goal: create deterministic tool functions the agent can call.
-
-Files:
-
-- `src/lib/recon/extraction/tools.ts`
-- `src/lib/recon/extraction/ocr-image.ts`
-- `src/lib/recon/extraction/parse-pdf-text.ts`
-- `src/lib/recon/extraction/parse-pdf-tables.ts`
-- `src/lib/recon/extraction/request-manual-correction.ts`
-
-Tool result shape:
+### TypeScript Target
 
 ```ts
-type ExtractionToolResult = {
-  route: "ocr_image" | "parse_pdf_text" | "parse_pdf_tables" | "manual_correction";
-  rawText: string;
-  candidateFields: Partial<PaymentProofExtraction>;
-  fieldEvidence: FieldEvidence[];
-  confidenceByField: Record<string, number>;
-  warnings: string[];
+type PaymentProofExtractionOutput = {
+  schemaVersion: "1.0.0";
+  proofId: string;
+  sourceFileId: string;
+  financialPayload: {
+    documentType:
+      | "provider_receipt"
+      | "bank_advice"
+      | "swift_confirmation"
+      | "remittance_advice"
+      | "internal_transfer_slip"
+      | "other";
+    paymentStatus: "ACSC" | "ACSP" | "PNDG" | "RJCT" | "CANC" | "UNKNOWN";
+    paymentStatusLabel: string | null;
+    rawPaymentStatus: string | null;
+    debtor: NormalizedParty;
+    creditor: NormalizedParty;
+    debtorAccount: AccountIdentifier | null;
+    creditorAccount: AccountIdentifier | null;
+    paidAmount: MoneyAmount | null;
+    paymentDate: ReconDate | null;
+    valueDate: ReconDate | null;
+    bookingDate: ReconDate | null;
+    reference: PaymentReference;
+    providerTransactionId: string | null;
+    providerOrBankName: string | null;
+    invoiceIds: string[];
+    endToEndId: string | null;
+    uetr: string | null;
+    feeAmount: MoneyAmount | null;
+    netAmount: MoneyAmount | null;
+    sourceAmount: MoneyAmount | null;
+    targetAmount: MoneyAmount | null;
+    exchangeRateInformation: ExchangeRateInformation | null;
+    remittanceInformation: RemittanceInformation;
+    rawText: string | null;
+  };
+  aiMetadata: {
+    extractionRoute: "parse_pdf_text" | "parse_pdf_table" | "parse_image_ocr" | "manual_correction";
+    overallConfidence: number;
+    fieldConfidence: Record<string, number>;
+    evidenceSpans: FieldEvidence[];
+    requiresManualReview: boolean;
+    warnings: Warning[];
+  };
 };
 ```
 
-Implement fixture-backed tools first:
+### Example JSON
 
-- `ocrImage(descriptor)`
-- `parsePdfText(descriptor)`
-- `parsePdfTables(descriptor)`
-- `requestManualCorrection(descriptor, missingFields)`
-
-Important:
-
-- These tools can use simple regex/table extraction for demo fixtures.
-- They must return evidence and confidence.
-- They must not do matching.
-- They must not do FX math.
-- They must not invent missing values.
-
-### Step 7: Extraction Agent
-
-Goal: build the actual Agent 1 loop.
-
-Files:
-
-- `src/lib/recon/extraction/extraction-agent.ts`
-- `src/lib/recon/extraction/extraction-agent.test.ts`
-- `src/lib/recon/timeline.ts`
-
-Agent loop:
-
-1. Observe file descriptor.
-2. Decide route:
-   - image and not low quality -> `ocr_image`
-   - PDF with table signal -> `parse_pdf_tables`
-   - PDF with text layer -> `parse_pdf_text`
-   - low quality or unknown -> `manual_correction`
-3. Call selected tool.
-4. Observe tool result.
-5. Assemble `PaymentProofExtraction`.
-6. Validate with Zod.
-7. Flag manual review if confidence/critical fields are unsafe.
-8. Write timeline events.
-
-Timeline events:
-
-- Observed file type and quality.
-- Chose route and why.
-- Called tool.
-- Produced structured JSON.
-- Flagged manual review if needed.
-
-Done when:
-
-- The same agent routes different fixtures to different tools.
-- Output always matches `PaymentProofExtraction`.
-- Timeline proves the agent loop.
-
-### Step 8: Minimal Demo Endpoint And Page
-
-Goal: show blocks 1 and 2 working without building the full product.
-
-Files:
-
-- `src/app/api/recon/demo/route.ts`
-- `src/app/api/recon/extract/route.ts`
-- `src/app/page.tsx`
-- `src/scripts/run-extraction-demo.ts`
-
-Demo should show:
-
-- Expected payment records parsed count.
-- Bank statement rows parsed count.
-- Each proof file.
-- Chosen extraction route.
-- Overall confidence.
-- Manual review flag.
-- Extracted fields.
-- Timeline events.
-
-The page can be simple. This is not dashboard work yet.
-
-## Acceptance Tests
-
-Run these before calling blocks 1 and 2 complete:
-
-```bash
-npm run typecheck
-npm test
-npm run demo:extract
-npm run build
+```json
+{
+  "schemaVersion": "1.0.0",
+  "proofId": "proof_001",
+  "sourceFileId": "proof_file_001",
+  "financialPayload": {
+    "documentType": "provider_receipt",
+    "paymentStatus": "ACSC",
+    "paymentStatusLabel": "Settled",
+    "rawPaymentStatus": "Paid",
+    "debtor": {
+      "name": "Acme Pte Ltd",
+      "normalizedName": "ACME"
+    },
+    "creditor": {
+      "name": "ReconPilot Sdn Bhd",
+      "normalizedName": "RECONPILOT"
+    },
+    "debtorAccount": {
+      "iban": null,
+      "swiftBic": "WISEGB22",
+      "localAccountId": null,
+      "maskedAccount": "****1234"
+    },
+    "creditorAccount": {
+      "iban": null,
+      "swiftBic": null,
+      "localAccountId": "MYR_MAIN_ACCOUNT",
+      "maskedAccount": "****7788"
+    },
+    "paidAmount": {
+      "value": "10.00",
+      "currency": "USD"
+    },
+    "paymentDate": "2026-05-20",
+    "valueDate": null,
+    "bookingDate": null,
+    "reference": {
+      "raw": "INV-1001",
+      "normalized": "INV1001"
+    },
+    "providerTransactionId": "WISE-TRX-88291",
+    "providerOrBankName": "Wise",
+    "invoiceIds": ["INV-1001"],
+    "endToEndId": null,
+    "uetr": null,
+    "feeAmount": null,
+    "netAmount": null,
+    "sourceAmount": {
+      "value": "10.00",
+      "currency": "USD"
+    },
+    "targetAmount": {
+      "value": "42.50",
+      "currency": "MYR"
+    },
+    "exchangeRateInformation": {
+      "unitCurrency": "USD",
+      "quotedCurrency": "MYR",
+      "exchangeRate": "4.2500",
+      "rateType": "AGREED",
+      "source": "payment_proof",
+      "contractId": null,
+      "evidenceText": "Exchange rate: 1 USD = 4.2500 MYR"
+    },
+    "remittanceInformation": {
+      "raw": "Payment for INV-1001",
+      "structured": {
+        "invoiceNumber": "INV-1001"
+      }
+    },
+    "rawText": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Exchange rate: 1 USD = 4.2500 MYR. Date 2026-05-20."
+  },
+  "aiMetadata": {
+    "extractionRoute": "parse_pdf_text",
+    "overallConfidence": 0.96,
+    "fieldConfidence": {
+      "financialPayload.debtor.name": 0.94,
+      "financialPayload.creditor.name": 0.96,
+      "financialPayload.paidAmount.value": 0.99,
+      "financialPayload.paidAmount.currency": 0.99,
+      "financialPayload.paymentDate": 0.98,
+      "financialPayload.reference.raw": 0.97,
+      "financialPayload.exchangeRateInformation.exchangeRate": 0.95
+    },
+    "evidenceSpans": [
+      {
+        "field": "financialPayload.paidAmount.value",
+        "value": "10.00",
+        "confidence": 0.99,
+        "source": "pdf_text",
+        "evidenceText": "Paid USD 10.00",
+        "page": 1,
+        "bbox": null,
+        "warnings": []
+      },
+      {
+        "field": "financialPayload.exchangeRateInformation.exchangeRate",
+        "value": "4.2500",
+        "confidence": 0.95,
+        "source": "pdf_text",
+        "evidenceText": "Exchange rate: 1 USD = 4.2500 MYR",
+        "page": 1,
+        "bbox": null,
+        "warnings": []
+      }
+    ],
+    "requiresManualReview": false,
+    "warnings": []
+  }
+}
 ```
 
-Manual checks:
+### Example When FX Is Not Provided
 
-- Expected payment schemas feel like invoice/receivable records, not generic rows.
-- Bank statement schemas feel like booked bank transactions, not random CSV rows.
-- Payment proof extraction feels like payment/remittance evidence, not plain OCR.
-- Every important extracted field has confidence and evidence.
-- Low-confidence proof is routed to manual correction.
-- Agent 1 does not perform matching.
-- Agent 1 does not perform FX calculations.
-- Agent 1 does not create accounting entries.
+```json
+{
+  "exchangeRateInformation": null
+}
+```
 
-## What To Build First If Time Is Tight
+### Example When FX Is Only Implied
 
-If there is limited time, prioritize in this order:
+Use this only when the proof contains both source and target amounts but no explicit rate.
 
-1. `schemas.ts` and `types.ts`
-2. `normalizers.ts`
-3. fixtures
-4. expected payment parser
-5. bank statement parser
-6. extraction tools
-7. extraction agent
-8. timeline
-9. simple demo script
-10. simple page/API
+```json
+{
+  "exchangeRateInformation": {
+    "unitCurrency": "USD",
+    "quotedCurrency": "MYR",
+    "exchangeRate": "4.2500",
+    "rateType": "IMPLIED",
+    "source": "computed_implied",
+    "contractId": null,
+    "evidenceText": "Computed from sourceAmount USD 10.00 and targetAmount MYR 42.50"
+  }
+}
+```
 
-The schema is the prize. Once the schema is solid, the rest of the hackathon build has a strong spine.
+## Implementation Order For This File
+
+1. Create `src/lib/recon/schemas.ts`.
+2. Add shared Zod primitives.
+3. Add expected payment schema.
+4. Add bank statement transaction schema.
+5. Add payment proof input descriptor schema.
+6. Add payment proof extraction output schema.
+7. Export TypeScript types from `src/lib/recon/types.ts`.
+8. Create fixtures that match the JSON examples in this file.
+9. Add tests for valid and invalid examples.
+
+## Schema Tests
+
+Minimum tests:
+
+- valid expected payment record passes;
+- valid bank statement transaction passes;
+- valid payment proof input descriptor passes;
+- valid payment proof extraction output passes;
+- lowercase currency fails;
+- invalid date fails;
+- negative money amount fails;
+- missing reference is allowed but creates a warning;
+- missing debtor or creditor is allowed in extraction output but creates a warning;
+- `exchangeRateInformation` can be explicit, implied, or null.
 
 ## Definition Of Done
 
-Blocks 1 and 2 are done when:
+The schema contract is done when:
 
-- The app can load demo expected payment records.
-- The app can load demo bank statement rows.
-- The app can process demo payment proofs.
-- The Extraction Agent chooses different extraction tools based on proof type.
-- The extracted proof JSON follows the industry-standard-inspired schema.
-- Every critical extracted field includes confidence and evidence.
-- Ambiguous proofs require manual review.
-- Timeline events make the agentic behavior visible.
-- No reconciliation matching has been implemented yet.
+- the four schemas exist in TypeScript/Zod;
+- the four example JSON payloads validate;
+- missing messy-source fields can be represented truthfully as `null`;
+- warnings explain missing or low-confidence fields;
+- payment proof extraction separates `financialPayload` from `aiMetadata`;
+- exchange rate data is extracted only when present or clearly implied;
+- no reconciliation matching is implemented in this schema phase.
