@@ -14,6 +14,8 @@ The goal is not to implement full ISO 20022 XML messages. The goal is to produce
 
 Use this file as the source of truth for:
 
+- input batches;
+- uploaded file descriptors;
 - expected payment records;
 - bank statement transactions;
 - payment proof input descriptors;
@@ -43,6 +45,9 @@ This schema contract covers:
 4. **Payment Proof Extraction Outputs**
    - Structured, evidence-backed payment data extracted from proof files.
    - This is the most important output of Agent 1.
+
+5. **Input Batches**
+   - Groups files, parsed records, proof descriptors, and extraction outputs for one upload/reconciliation run.
 
 This file does **not** cover:
 
@@ -79,6 +84,7 @@ Avoid overclaiming:
 
 - **ISO 4217**
   - Currency codes must be uppercase alpha codes such as `USD`, `MYR`, `SGD`.
+  - For the MVP, restrict accepted currencies to `MYR`, `USD`, `SGD`, and `EUR`.
 
 - **ISO 8601**
   - Invoice-style dates may be `YYYY-MM-DD`.
@@ -116,6 +122,7 @@ src/lib/recon/fixtures/expected-payment-rows.ts
 src/lib/recon/fixtures/bank-statement-rows.ts
 src/lib/recon/fixtures/payment-proof-descriptors.ts
 src/lib/recon/fixtures/payment-proof-extractions.ts
+src/lib/recon/fixtures/input-batch.ts
 
 src/lib/recon/parsers/expected-payments.ts
 src/lib/recon/parsers/bank-statements.ts
@@ -130,6 +137,8 @@ type CurrencyCode = string; // ISO 4217 uppercase, validated by Zod allowlist
 type IsoDate = string; // YYYY-MM-DD
 type IsoDateTime = string; // full ISO 8601 datetime with timezone offset
 type ReconDate = IsoDate | IsoDateTime;
+
+const mvpCurrencies = ["MYR", "USD", "SGD", "EUR"] as const;
 
 type MoneyAmount = {
   value: string; // non-negative decimal string, e.g. "42.50"
@@ -171,8 +180,22 @@ type ExchangeRateInformation = {
   evidenceText: string | null;
 };
 
+type WarningCode =
+  | "UNMAPPED_COLUMN"
+  | "AMBIGUOUS_COLUMN_MAPPING"
+  | "MISSING_REQUIRED_COLUMN"
+  | "INVALID_MONEY_FORMAT"
+  | "INVALID_DATE_FORMAT"
+  | "INVALID_CURRENCY"
+  | "MISSING_PAYMENT_REFERENCE"
+  | "MISSING_DEBTOR"
+  | "MISSING_CREDITOR"
+  | "LOW_CONFIDENCE_EXTRACTION"
+  | "PAYMENT_NOT_SETTLED"
+  | "IMPLIED_FX_MISSING_AMOUNTS";
+
 type Warning = {
-  code: string; // SCREAMING_SNAKE_CASE
+  code: WarningCode;
   message: string;
   field: string | null;
 };
@@ -180,6 +203,8 @@ type Warning = {
 type FieldEvidence = {
   field: string;
   value: string | null;
+  originalValue: string | null;
+  normalizedValue: string | null;
   confidence: number; // 0 to 1
   source: "csv" | "xlsx" | "pdf_text" | "pdf_table" | "image_ocr" | "manual" | "fixture";
   evidenceText: string | null;
@@ -196,6 +221,19 @@ type RemittanceInformation = {
     additionalInfo?: string | null;
   } | null;
 };
+
+type DemoFixture = {
+  rawText?: string | null;
+  rawTable?: string[][] | null;
+  rawOcr?: string | null;
+};
+```
+
+### Zod Implementation Notes
+
+```ts
+const mvpCurrencySchema = z.enum(["MYR", "USD", "SGD", "EUR"]);
+const isoDateTimeSchema = z.string().datetime({ offset: true });
 ```
 
 ### Key Rules
@@ -209,6 +247,44 @@ type RemittanceInformation = {
 - Expected payment records need `reconciliationStatus` so later matching can skip records that are already matched, partially matched, or void.
 - If `exchangeRateInformation.rateType` is `IMPLIED`, then both `sourceAmount` and `targetAmount` must be present.
 - `normalizationMetadata.normalizedAt` must be an ISO 8601 datetime with timezone offset, not a free text string.
+- If `financialPayload.paymentStatus` is not `ACSC`, then `aiMetadata.requiresManualReview` must be `true`.
+- `FieldEvidence.originalValue` and `FieldEvidence.normalizedValue` should be used to show how raw extracted data changed after deterministic normalization.
+
+## Schema 0: Input File Descriptor
+
+This describes any uploaded file before parsing or extraction. Use it for expected payment files, bank statements, and payment proofs.
+
+### TypeScript Target
+
+```ts
+type InputFileDescriptor = {
+  schemaVersion: "1.0.0";
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  inputKind: "expected_payment_records" | "bank_statement" | "payment_proof";
+  sizeBytes: number | null;
+  uploadedAt: IsoDateTime;
+  parseStatus: "PENDING" | "PARSED" | "FAILED" | "NEEDS_MAPPING";
+  warnings: Warning[];
+};
+```
+
+### Example JSON
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "fileId": "file_expected_001",
+  "fileName": "expected-payments.csv",
+  "mimeType": "text/csv",
+  "inputKind": "expected_payment_records",
+  "sizeBytes": 12240,
+  "uploadedAt": "2026-05-23T18:30:00+08:00",
+  "parseStatus": "PARSED",
+  "warnings": []
+}
+```
 
 ## Schema 1: Expected Payment Record
 
@@ -305,6 +381,8 @@ type ExpectedPaymentRecord = {
     {
       "field": "invoiceNumber",
       "value": "INV-1001",
+      "originalValue": "INV-1001",
+      "normalizedValue": "INV1001",
       "confidence": 1,
       "source": "csv",
       "evidenceText": "invoice_number=INV-1001",
@@ -410,15 +488,12 @@ type BankStatementTransaction = {
 
 ## Schema 3: Payment Proof Input Descriptor
 
-This describes an uploaded proof before extraction. It is not yet a financial record.
+This extends the general `InputFileDescriptor` with proof-specific routing hints. It is not yet a financial record.
 
 ### TypeScript Target
 
 ```ts
-type PaymentProofInputDescriptor = {
-  schemaVersion: "1.0.0";
-  fileId: string;
-  fileName: string;
+type PaymentProofInputDescriptor = InputFileDescriptor & {
   mimeType:
     | "application/pdf"
     | "image/jpeg"
@@ -427,14 +502,10 @@ type PaymentProofInputDescriptor = {
     | "image/tiff"
     | "text/plain";
   inputKind: "payment_proof";
-  sizeBytes: number | null;
   textLayer: boolean;
   tableLikely: boolean;
   imageQuality: "high" | "medium" | "low" | "unknown";
-  rawTextFixture: string | null;
-  rawTableFixture: string[][] | null;
-  rawOcrFixture: string | null;
-  warnings: Warning[];
+  demoFixture?: DemoFixture;
 };
 ```
 
@@ -448,12 +519,16 @@ type PaymentProofInputDescriptor = {
   "mimeType": "application/pdf",
   "inputKind": "payment_proof",
   "sizeBytes": 248910,
+  "uploadedAt": "2026-05-23T18:31:00+08:00",
+  "parseStatus": "PENDING",
   "textLayer": true,
   "tableLikely": false,
   "imageQuality": "high",
-  "rawTextFixture": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Exchange rate: 1 USD = 4.2500 MYR. Date 2026-05-20.",
-  "rawTableFixture": null,
-  "rawOcrFixture": null,
+  "demoFixture": {
+    "rawText": "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Exchange rate: 1 USD = 4.2500 MYR. Date 2026-05-20.",
+    "rawTable": null,
+    "rawOcr": null
+  },
   "warnings": []
 }
 ```
@@ -607,6 +682,8 @@ type PaymentProofExtractionOutput = {
       {
         "field": "financialPayload.paidAmount.value",
         "value": "10.00",
+        "originalValue": "USD 10.00",
+        "normalizedValue": "10.00",
         "confidence": 0.99,
         "source": "pdf_text",
         "evidenceText": "Paid USD 10.00",
@@ -617,6 +694,8 @@ type PaymentProofExtractionOutput = {
       {
         "field": "financialPayload.exchangeRateInformation.exchangeRate",
         "value": "4.2500",
+        "originalValue": "1 USD = 4.2500 MYR",
+        "normalizedValue": "4.2500",
         "confidence": 0.95,
         "source": "pdf_text",
         "evidenceText": "Exchange rate: 1 USD = 4.2500 MYR",
@@ -664,6 +743,10 @@ if (financialPayload.exchangeRateInformation?.rateType === "IMPLIED") {
   sourceAmount must not be null;
   targetAmount must not be null;
 }
+
+if (financialPayload.paymentStatus !== "ACSC") {
+  aiMetadata.requiresManualReview must be true;
+}
 ```
 
 ## Normalized Post-Processing Record
@@ -702,17 +785,67 @@ Zod implementation note:
 const isoDateTimeSchema = z.string().datetime({ offset: true });
 ```
 
+## Schema 5: Input Batch
+
+This is the parent object for one upload/reconciliation run. The dashboard and later Orchestrator Agent should use `batchId` to keep expected payments, bank rows, proof inputs, and proof extractions together.
+
+### TypeScript Target
+
+```ts
+type InputBatch = {
+  schemaVersion: "1.0.0";
+  batchId: string;
+  uploadedAt: IsoDateTime;
+  files: InputFileDescriptor[];
+  expectedPayments: ExpectedPaymentRecord[];
+  bankTransactions: BankStatementTransaction[];
+  paymentProofInputs: PaymentProofInputDescriptor[];
+  paymentProofExtractions: PaymentProofExtractionOutput[];
+  warnings: Warning[];
+};
+```
+
+### Example JSON
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "batchId": "batch_001",
+  "uploadedAt": "2026-05-23T18:32:00+08:00",
+  "files": [
+    {
+      "schemaVersion": "1.0.0",
+      "fileId": "file_expected_001",
+      "fileName": "expected-payments.csv",
+      "mimeType": "text/csv",
+      "inputKind": "expected_payment_records",
+      "sizeBytes": 12240,
+      "uploadedAt": "2026-05-23T18:30:00+08:00",
+      "parseStatus": "PARSED",
+      "warnings": []
+    }
+  ],
+  "expectedPayments": [],
+  "bankTransactions": [],
+  "paymentProofInputs": [],
+  "paymentProofExtractions": [],
+  "warnings": []
+}
+```
+
 ## Implementation Order For This File
 
 1. Create `src/lib/recon/schemas.ts`.
 2. Add shared Zod primitives.
-3. Add expected payment schema.
-4. Add bank statement transaction schema.
-5. Add payment proof input descriptor schema.
-6. Add payment proof extraction output schema.
-7. Export TypeScript types from `src/lib/recon/types.ts`.
-8. Create fixtures that match the JSON examples in this file.
-9. Add tests for valid and invalid examples.
+3. Add general input file descriptor schema.
+4. Add expected payment schema.
+5. Add bank statement transaction schema.
+6. Add payment proof input descriptor schema.
+7. Add payment proof extraction output schema.
+8. Add input batch schema.
+9. Export TypeScript types from `src/lib/recon/types.ts`.
+10. Create fixtures that match the JSON examples in this file.
+11. Add tests for valid and invalid examples.
 
 ## Schema Tests
 
@@ -720,10 +853,14 @@ Minimum tests:
 
 - valid expected payment record passes;
 - valid bank statement transaction passes;
+- valid general input file descriptor passes;
 - valid payment proof input descriptor passes;
 - valid payment proof extraction output passes;
+- valid input batch passes;
 - expected payment record includes `reconciliationStatus`;
+- payment proof descriptor uses `demoFixture` instead of root-level fixture fields;
 - lowercase currency fails;
+- unsupported MVP currency fails;
 - invalid date fails;
 - negative money amount fails;
 - missing reference is allowed but creates a warning;
@@ -732,17 +869,25 @@ Minimum tests:
 - normalized payment proof record is created after deterministic normalization;
 - `exchangeRateInformation` can be explicit, implied, or null;
 - `IMPLIED` exchange rate requires both `sourceAmount` and `targetAmount`.
+- payment status other than `ACSC` requires manual review;
+- parser warning codes include `UNMAPPED_COLUMN`, `AMBIGUOUS_COLUMN_MAPPING`, `MISSING_REQUIRED_COLUMN`, `INVALID_MONEY_FORMAT`, and `LOW_CONFIDENCE_EXTRACTION`;
+- `FieldEvidence` includes `originalValue` and `normalizedValue`.
 
 ## Definition Of Done
 
 The schema contract is done when:
 
-- the four schemas exist in TypeScript/Zod;
-- the four example JSON payloads validate;
+- input batch, file descriptor, expected payment, bank transaction, proof input, and proof extraction schemas exist in TypeScript/Zod;
+- all example JSON payloads validate;
 - expected payment records include `reconciliationStatus`;
+- uploaded files are grouped under an `InputBatch`;
+- payment proof demo fixture data is nested under `demoFixture`;
+- MVP currencies are explicitly allowlisted;
 - missing messy-source fields can be represented truthfully as `null`;
 - warnings explain missing or low-confidence fields;
+- parser mapping issues have explicit warning codes;
 - payment proof extraction separates `financialPayload` from `aiMetadata`;
 - payment proof extraction keeps raw party/reference fields before deterministic normalization;
+- evidence spans show original and normalized values;
 - exchange rate data is extracted only when present or clearly implied;
 - no reconciliation matching is implemented in this schema phase.
