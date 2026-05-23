@@ -390,7 +390,8 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
 
     - `createWarning(code, message, field)` returns a `Warning`.
     - `createEvidenceSpan(input)` returns a `FieldEvidence` with defaults `page: null`, `bbox: null`, and `warnings: []`.
-    - `missingFieldWarning(field, message)` returns a warning with a schema warning code appropriate for the field: `MISSING_PAID_AMOUNT`, `MISSING_PAYMENT_DATE`, `MISSING_PAYMENT_REFERENCE`, `MISSING_DEBTOR`, `MISSING_CREDITOR`, or `LOW_QUALITY_PROOF`.
+    - `missingFieldWarning(field, message)` returns a warning with a schema warning code appropriate for the missing field: `MISSING_PAID_AMOUNT`, `MISSING_PAYMENT_DATE`, `MISSING_PAYMENT_REFERENCE`, `MISSING_DEBTOR`, or `MISSING_CREDITOR`.
+    - `lowQualityProofWarning(message)` returns `LOW_QUALITY_PROOF` with `field: null`.
     - `lowConfidenceWarning(field, confidence)` returns `LOW_CONFIDENCE_EXTRACTION`.
 
     Supported evidence sources for Step 2 must be `pdf_text`, `pdf_table`, `image_ocr`, and `manual`.
@@ -400,6 +401,7 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
     import {
       createEvidenceSpan,
       createWarning,
+      lowQualityProofWarning,
       lowConfidenceWarning,
       missingFieldWarning,
     } from "./evidence";
@@ -437,6 +439,11 @@ Do not start Step 2 until `INPUT_PLAN.md` schemas/types and Agent 1 Step 1 tool 
         expect(missingFieldWarning("financialPayload.paidAmount", "No amount found").code).toBe("MISSING_PAID_AMOUNT");
         expect(missingFieldWarning("financialPayload.paymentDate", "No date found").code).toBe("MISSING_PAYMENT_DATE");
         expect(lowConfidenceWarning("financialPayload.paidAmount.value", 0.72).code).toBe("LOW_CONFIDENCE_EXTRACTION");
+      });
+
+      it("keeps low-quality proof warnings separate from missing field warnings", () => {
+        expect(lowQualityProofWarning("Proof is too blurred to extract").code).toBe("LOW_QUALITY_PROOF");
+        expect(lowQualityProofWarning("Proof is too blurred to extract").field).toBeNull();
       });
     });
   </test_code>
