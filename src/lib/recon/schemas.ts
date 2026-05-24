@@ -162,6 +162,7 @@ export const bankStatementTransactionSchema = z.object({
   creditDebitIndicator: z.enum(["CRDT", "DBIT"]),
   amount: moneyAmountSchema,
   acctSvcrRef: z.string().nullable(),
+  normalizedReference: z.string().nullable(),
   endToEndId: z.string().nullable(),
   txId: z.string().nullable(),
   debtorName: z.string().nullable(),
@@ -185,7 +186,11 @@ export const paymentProofInputDescriptorSchema = inputFileDescriptorSchema.exten
     "image/png",
     "image/webp",
     "image/tiff",
-    "text/plain"
+    "text/plain",
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   ]),
   inputKind: z.literal("payment_proof"),
   textLayer: z.boolean(),
@@ -241,7 +246,7 @@ export const paymentProofFinancialPayloadSchema = paymentProofFinancialPayloadBa
 });
 
 export const aiMetadataSchema = z.object({
-  extractionRoute: z.enum(["parse_pdf_text", "parse_pdf_table", "parse_image_ocr", "manual_correction"]),
+  extractionRoute: z.enum(["parse_pdf_text", "parse_pdf_table", "parse_csv_text", "parse_spreadsheet", "parse_image_ocr", "manual_correction"]),
   overallConfidence: z.number().min(0).max(1),
   fieldConfidence: z.record(z.number().min(0).max(1)),
   evidenceSpans: z.array(fieldEvidenceSchema),

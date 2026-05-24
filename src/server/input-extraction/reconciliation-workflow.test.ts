@@ -44,6 +44,9 @@ describe("extractReconciliationDocuments", () => {
     expect(result.extractions.bank_statement.selectedTool).toBe("parse_spreadsheet");
     expect(result.documents.invoice.readableTextLength).toBeGreaterThan(0);
     expect(result.documents.bank_statement.toolObservations).toContain("CSV text is available");
+    expect(result.codeTools.parsedInputBatch.batchId).toBe(result.batchId);
+    expect(result.codeTools.normalizedInputBatch.batchId).toBe(result.batchId);
+    expect(result.codeTools.normalizedInputBatch.timelines[0]?.agent).toBe("Code Tools");
 
     const storedInvoice = await readFile(result.documents.invoice.storageRef.uri, "utf8");
     expect(storedInvoice).toContain("INV-1001");

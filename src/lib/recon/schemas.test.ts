@@ -43,6 +43,7 @@ const bankTransaction = {
   creditDebitIndicator: "CRDT",
   amount: { value: "42.50", currency: "MYR" },
   acctSvcrRef: "BNK-9001",
+  normalizedReference: "INV1001",
   endToEndId: null,
   txId: null,
   debtorName: "ACME PTE LTD",

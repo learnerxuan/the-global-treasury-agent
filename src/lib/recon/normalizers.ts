@@ -33,11 +33,26 @@ export function normalize_party_name(input: string | null): string | null {
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T/;
 
+function isValidIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1]!;
+}
+
 // Never uses new Date() — timezone-unsafe for date-only extraction
 export function normalize_date(input: string | null): string | null {
   if (input === null) return null;
-  if (ISO_DATE_RE.test(input)) return input;
-  if (ISO_DATETIME_RE.test(input)) return input.slice(0, 10);
+  if (ISO_DATE_RE.test(input)) return isValidIsoDate(input) ? input : null;
+  if (ISO_DATETIME_RE.test(input)) {
+    const dateOnly = input.slice(0, 10);
+    return isValidIsoDate(dateOnly) ? dateOnly : null;
+  }
   return null;
 }
 

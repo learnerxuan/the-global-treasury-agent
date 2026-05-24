@@ -1,7 +1,7 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 
-import { normalize_currency_amount, normalize_date, normalize_party_name } from "../normalizers";
+import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../normalizers";
 import type { BankStatementTransaction, Warning } from "../types";
 
 // ─── Column Aliases ───────────────────────────────────────────────────────────
@@ -204,6 +204,7 @@ function buildRecord(
 
   // Bank reference
   const rawBankRef = get("bankRef");
+  const comparableReference = rawBankRef || invoiceFromDesc || rawDescription || null;
 
   return {
     schemaVersion: "1.0.0",
@@ -214,6 +215,7 @@ function buildRecord(
     creditDebitIndicator,
     amount: { value: amountValue ?? "0.00", currency: amountCurrency },
     acctSvcrRef: rawBankRef || null,
+    normalizedReference: normalize_reference(comparableReference),
     endToEndId: null,
     txId: null,
     debtorName: rawDebtorName || null,

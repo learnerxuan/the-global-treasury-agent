@@ -44,6 +44,7 @@ const BANK_TXN: BankStatementTransaction = {
   creditDebitIndicator: "CRDT",
   amount: { value: "42.50", currency: "MYR" },
   acctSvcrRef: null,
+  normalizedReference: "INV1001",
   endToEndId: null,
   txId: null,
   debtorName: "ACME PTE LTD",

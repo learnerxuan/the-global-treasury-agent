@@ -48,6 +48,7 @@ export const missingReferenceBatch: InputBatch = {
       creditDebitIndicator: "CRDT",
       amount: { value: "500.00", currency: "USD" },
       acctSvcrRef: "REF-20260523-001",
+      normalizedReference: "REF20260523001",
       endToEndId: null,
       txId: null,
       debtorName: "DELTA LTD",

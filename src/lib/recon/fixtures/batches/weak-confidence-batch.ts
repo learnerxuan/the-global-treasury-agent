@@ -47,6 +47,7 @@ export const weakConfidenceBatch: InputBatch = {
       creditDebitIndicator: "CRDT",
       amount: { value: "100.00", currency: "USD" },
       acctSvcrRef: "REF-20260522-001",
+      normalizedReference: "REF20260522001",
       endToEndId: null,
       txId: null,
       debtorName: "GAMMA CORP",

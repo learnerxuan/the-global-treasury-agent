@@ -74,6 +74,7 @@ export const ambiguousReferenceBatch: InputBatch = {
       creditDebitIndicator: "CRDT",
       amount: { value: "100.00", currency: "USD" },
       acctSvcrRef: "REF-20260524-001",
+      normalizedReference: "REF20260524001",
       endToEndId: null,
       txId: null,
       debtorName: "ACME PTE LTD",

@@ -20,6 +20,10 @@ type ApiResult = {
   uploadedAt: string;
   documents: Record<DocumentRole, { fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>;
   extractions: Record<DocumentRole, ExtractionResult>;
+  codeTools: {
+    parsedInputBatch: unknown;
+    normalizedInputBatch: unknown;
+  };
 };
 
 type UploadKey = "invoice" | "bankStatement" | "paymentProof";
@@ -52,6 +56,14 @@ export default function Home() {
   const [status, setStatus] = useState<"ready" | "pending" | "readyDone" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResult | null>(null);
+  const structuredExtractionJson = result
+    ? {
+        batchId: result.batchId,
+        uploadedAt: result.uploadedAt,
+        documents: result.documents,
+        extractions: result.extractions
+      }
+    : {};
 
   const statusCopy = useMemo(() => {
     if (status === "pending") return "AI provider is selecting tools";
@@ -101,7 +113,7 @@ export default function Home() {
           <p className="eyebrow">ReconPilot MVP</p>
           <h1>Three-Document Extraction</h1>
           <p className="lede">
-            Upload the three source documents used by the MVP. The API stores the files, prepares readable evidence, and Chutes selects the extraction route for each document before returning structured finance JSON.
+            Upload the three source documents used by the MVP. The API stores the files, prepares readable evidence, and the AI extraction provider selects the route for each document before Code Tools parse and normalize the finance JSON.
           </p>
         </div>
         <div className="rule-card">
@@ -207,7 +219,17 @@ export default function Home() {
             </div>
             <span className="status-pill neutral">JSON</span>
           </div>
-          <pre tabIndex={0}>{JSON.stringify(result ?? {}, null, 2)}</pre>
+          <pre tabIndex={0}>{JSON.stringify(structuredExtractionJson, null, 2)}</pre>
+        </article>
+        <article className="panel json-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Code Tools Output</p>
+              <h2>Parsed + Normalized JSON</h2>
+            </div>
+            <span className="status-pill neutral">JSON</span>
+          </div>
+          <pre tabIndex={0}>{JSON.stringify(result?.codeTools ?? {}, null, 2)}</pre>
         </article>
       </section>
     </main>

@@ -89,6 +89,12 @@ describe("normalize_date", () => {
   it("returns null for free-text date", () => {
     expect(normalize_date("May 20, 2026")).toBeNull();
   });
+  it("returns null for impossible ISO calendar dates", () => {
+    expect(normalize_date("2026-02-31")).toBeNull();
+  });
+  it("returns null for impossible ISO datetime calendar dates", () => {
+    expect(normalize_date("2026-02-31T00:00:00.000Z")).toBeNull();
+  });
   it("returns null for null input", () => {
     expect(normalize_date(null)).toBeNull();
   });
