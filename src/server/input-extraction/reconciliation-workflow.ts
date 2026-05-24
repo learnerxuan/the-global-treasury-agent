@@ -8,6 +8,7 @@ import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocu
 import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
 import { runReconciliationOrchestrator } from "../../lib/recon/reconciliation/orchestrator";
 import type { OrchestratorOutput } from "../../lib/recon/reconciliation/types";
+import { buildAgentActivity, type AgentActivityEvent } from "./agent-activity";
 import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
 import type {
   BankStatementTransaction,
@@ -81,6 +82,8 @@ export type ReconciliationExtractionResponse = {
   // available (see UI plan §14).
   reconciliation: OrchestratorOutput | null;
   reconciliationError: string | null;
+  // Unified, ordered process feed: Extraction Agent -> Code Tools -> Agent 2.
+  agentActivity: AgentActivityEvent[];
 };
 
 export type ReconciliationExtractionOptions = {
@@ -619,6 +622,8 @@ export async function extractReconciliationDocuments(
     reconciliationError = error instanceof Error ? error.message : "Reconciliation failed before classification.";
   }
 
+  const agentActivity = buildAgentActivity({ documents, extractions, normalizedInputBatch, reconciliation });
+
   return {
     batchId,
     uploadedAt,
@@ -629,6 +634,7 @@ export async function extractReconciliationDocuments(
       normalizedInputBatch
     },
     reconciliation,
-    reconciliationError
+    reconciliationError,
+    agentActivity
   };
 }

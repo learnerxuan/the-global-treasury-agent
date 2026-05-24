@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, ReactNode, useMemo, useState } from "react";
-import type { NormalizedInputBatch, TimelineEvent } from "../src/lib/recon/types";
+import { FormEvent, ReactNode, useState } from "react";
+import type { NormalizedInputBatch } from "../src/lib/recon/types";
 import type { OrchestratorOutput } from "../src/lib/recon/reconciliation/types";
+import type { AgentActivityEvent } from "../src/server/input-extraction/agent-activity";
 import { AppHeader } from "../src/components/AppHeader";
 import { AgentActivityPanel } from "../src/components/reconciliation/AgentActivityPanel";
 import { ReconciliationDashboard } from "../src/components/reconciliation/ReconciliationDashboard";
@@ -18,6 +19,7 @@ type ApiResult = {
   };
   reconciliation: OrchestratorOutput | null;
   reconciliationError: string | null;
+  agentActivity: AgentActivityEvent[];
 };
 
 type UploadKey = "invoices" | "paymentProofs" | "bankStatements";
@@ -75,11 +77,6 @@ export default function Home() {
 
   const allUploaded = uploadCards.every((card) => files[card.key].length > 0);
   const showActivity = status === "pending" || result !== null;
-
-  const extractionTimeline: TimelineEvent[] = useMemo(
-    () => result?.codeTools.normalizedInputBatch.timelines ?? [],
-    [result]
-  );
 
   function addFiles(key: UploadKey, incoming: File[]) {
     setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
@@ -222,11 +219,7 @@ export default function Home() {
             </div>
 
             {showActivity ? (
-              <AgentActivityPanel
-                extractionTimeline={extractionTimeline}
-                reconciliation={result?.reconciliation ?? null}
-                processing={status === "pending"}
-              />
+              <AgentActivityPanel activity={result?.agentActivity ?? []} processing={status === "pending"} />
             ) : null}
           </div>
         </form>

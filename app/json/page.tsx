@@ -11,9 +11,12 @@ type StoredResult = {
   codeTools: { parsedInputBatch: unknown; normalizedInputBatch: unknown };
 };
 
+type Tab = "structured" | "normalized";
+
 export default function JsonPage() {
   const [data, setData] = useState<StoredResult | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState<Tab>("structured");
 
   useEffect(() => {
     try {
@@ -50,19 +53,20 @@ export default function JsonPage() {
         ) : null}
 
         {data ? (
-          <div className="debug-grid">
-            <article className="panel json-panel">
-              <div className="panel-header">
-                <h2>Structured Extraction JSON</h2>
-              </div>
-              <pre tabIndex={0}>{JSON.stringify(structuredExtraction, null, 2)}</pre>
-            </article>
-            <article className="panel json-panel">
-              <div className="panel-header">
-                <h2>Parsed + Normalized JSON</h2>
-              </div>
-              <pre tabIndex={0}>{JSON.stringify(data.codeTools, null, 2)}</pre>
-            </article>
+          <div className="panel json-panel">
+            <div className="tabs">
+              <button type="button" className={`tab ${tab === "structured" ? "is-active" : ""}`} onClick={() => setTab("structured")}>
+                Structured Extraction JSON
+              </button>
+              <button type="button" className={`tab ${tab === "normalized" ? "is-active" : ""}`} onClick={() => setTab("normalized")}>
+                Parsed + Normalized JSON
+              </button>
+            </div>
+            <pre tabIndex={0}>
+              {tab === "structured"
+                ? JSON.stringify(structuredExtraction, null, 2)
+                : JSON.stringify(data.codeTools, null, 2)}
+            </pre>
           </div>
         ) : null}
       </main>
