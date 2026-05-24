@@ -7,6 +7,7 @@ export type ChutesClientOptions = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  provider?: "chutes" | "nvidia";
 };
 
 export type ChutesChatOptions = {
@@ -23,24 +24,50 @@ export class ChutesClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly provider: "chutes" | "nvidia";
 
   constructor(options: ChutesClientOptions = {}) {
-    const apiKey = options.apiKey ?? readLocalEnvValue("CHUTES_API_KEY");
+    const provider =
+      options.provider ??
+      (readLocalEnvValue("LLM_PROVIDER") as "chutes" | "nvidia" | undefined) ??
+      (readLocalEnvValue("NVIDIA_API_KEY") && !readLocalEnvValue("CHUTES_API_KEY") ? "nvidia" : "chutes");
+
+    const apiKey =
+      options.apiKey ??
+      (provider === "nvidia" ? readLocalEnvValue("NVIDIA_API_KEY") : readLocalEnvValue("CHUTES_API_KEY"));
     if (!apiKey) {
-      throw new Error("CHUTES_API_KEY is required to run AI extraction.");
+      throw new Error(
+        provider === "nvidia"
+          ? "NVIDIA_API_KEY is required to run AI extraction with NVIDIA."
+          : "CHUTES_API_KEY is required to run AI extraction with Chutes."
+      );
     }
 
+    this.provider = provider;
     this.apiKey = apiKey;
-    this.baseUrl = options.baseUrl ?? readLocalEnvValue("CHUTES_BASE_URL") ?? "https://llm.chutes.ai/v1";
-    this.model = options.model ?? readLocalEnvValue("CHUTES_MODEL") ?? "default:latency";
+    this.baseUrl =
+      options.baseUrl ??
+      (provider === "nvidia"
+        ? readLocalEnvValue("NVIDIA_BASE_URL") ?? "https://integrate.api.nvidia.com/v1"
+        : readLocalEnvValue("CHUTES_BASE_URL") ?? "https://llm.chutes.ai/v1");
+    this.model =
+      options.model ??
+      (provider === "nvidia"
+        ? readLocalEnvValue("NVIDIA_MODEL") ?? "meta/llama-3.3-70b-instruct"
+        : readLocalEnvValue("CHUTES_MODEL") ?? "default:latency");
   }
 
   async chat(options: ChutesChatOptions): Promise<string> {
+    const authHeader =
+      this.provider === "nvidia"
+        ? { Authorization: `Bearer ${this.apiKey}` }
+        : { "X-API-Key": this.apiKey };
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-API-Key": this.apiKey
+        ...authHeader
       },
       body: JSON.stringify({
         model: this.model,
@@ -52,7 +79,7 @@ export class ChutesClient {
 
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Chutes request failed with ${response.status}: ${text.slice(0, 500)}`);
+      throw new Error(`${this.provider} request failed with ${response.status}: ${text.slice(0, 500)}`);
     }
 
     const parsed = JSON.parse(text) as {
