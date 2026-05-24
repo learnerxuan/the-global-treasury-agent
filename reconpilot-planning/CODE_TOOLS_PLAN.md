@@ -7,6 +7,14 @@ Date: 2026-05-24
 
 ---
 
+## 0. Implementation Todo
+
+Use [CODE_TOOLS_PARSE_NORMALIZE_TODO.md](CODE_TOOLS_PARSE_NORMALIZE_TODO.md) as the implementation checklist for this plan.
+
+This todo is intentionally limited to parsing and normalization. Agent 2 owns the separate Reconciliation Tools.
+
+---
+
 ## 1. Boundary Rule
 
 ```
@@ -15,7 +23,23 @@ Code Tools  →  deterministically normalizes fields
 Agent 2  →  matches normalized evidence
 ```
 
-Code Tools must not: call any LLM, match proofs to invoices, fetch FX rates, score candidates, classify status, or generate reports.
+In this document, "Code Tools" means **Parse + Normalize Tools only**.
+
+Parse + Normalize Tools must not: call any LLM, match proofs to invoices, fetch FX rates, score candidates, classify status, or generate reports.
+
+Those reconciliation actions are still required, but they belong to **Agent 2 + Reconciliation Tools**, not this parse/normalize layer:
+
+```text
+Agent 2 owns:
+- generateBankAnchoredCandidates()
+- calculateFxScenarios()
+- evaluateAmountResidual()
+- evaluateFeeHypothesis()
+- scoreCandidate()
+- classifyMatch()
+```
+
+This boundary prevents the parse/normalize layer from accidentally becoming the matching engine.
 
 **Schema reference:** All type definitions (`ExpectedPaymentRecord`, `BankStatementTransaction`, `PaymentProofInputDescriptor`, `PaymentProofExtractionOutput`, `InputBatch`, shared primitives) are defined in [INPUT_PLAN.md](INPUT_PLAN.md). Do not redefine them here — treat that file as the source of truth.
 
@@ -111,6 +135,8 @@ Key: `debtor`, `creditor`, and `reference` are **raw** — not normalized yet.
 ## 3. Output: What You Hand to Agent 2
 
 You produce a `NormalizedInputBatch`:
+
+> Contract note: `NormalizedInputBatch` is the handoff object from Parse + Normalize Tools to Agent 2. If `INPUT_PLAN.md` does not define this type yet during implementation, keep this exact shape as the working contract and align it into shared schemas before integration. Do not silently rename or reshape it without updating Agent 2.
 
 ```json
 {
