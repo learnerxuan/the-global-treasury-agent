@@ -110,6 +110,23 @@ describe("scoreCandidate", () => {
     expect(scored.data.hardReviewFlags).toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
   });
 
+  it("flags low critical-field confidence using workflow field paths", () => {
+    const candidate = makeCandidate(
+      {},
+      {
+        overallConfidence: 0.95,
+        fieldConfidence: {
+          "financialPayload.paidAmount.value": 0.6,
+          "financialPayload.reference.raw": 0.95,
+          "financialPayload.paymentDate": 0.9
+        }
+      }
+    );
+    const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
+    if (!scored.ok) return;
+    expect(scored.data.hardReviewFlags).toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
+  });
+
   it("flags a non-settled proof", () => {
     const candidate = makeCandidate({ paymentStatus: "PNDG" });
     const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });

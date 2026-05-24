@@ -16,7 +16,11 @@ const SCORE_TOOL = "scoreCandidate";
 const COMPETITION_TOOL = "detectCompetingCandidates";
 
 // Proof fields whose low confidence must block an auto-match.
-const CRITICAL_PROOF_FIELDS = ["paidAmount.value", "reference.raw", "paymentDate"];
+const CRITICAL_PROOF_FIELD_ALIASES = [
+  ["financialPayload.paidAmount.value", "paidAmount.value"],
+  ["financialPayload.reference.raw", "reference.raw"],
+  ["financialPayload.paymentDate", "paymentDate"]
+];
 
 function dayDistanceDays(a: string, b: string): number {
   const msA = new Date(`${a.slice(0, 10)}T00:00:00.000Z`).getTime();
@@ -73,8 +77,8 @@ function lowCriticalConfidence(candidate: MatchCandidate, policy: Reconciliation
   const ai = candidate.proof?.aiMetadata;
   if (!ai) return false;
   if (ai.overallConfidence < policy.confidenceFloor) return true;
-  return CRITICAL_PROOF_FIELDS.some((field) => {
-    const value = ai.fieldConfidence[field];
+  return CRITICAL_PROOF_FIELD_ALIASES.some((aliases) => {
+    const value = aliases.map((field) => ai.fieldConfidence[field]).find((confidence) => confidence !== undefined);
     return value !== undefined && value < policy.confidenceFloor;
   });
 }

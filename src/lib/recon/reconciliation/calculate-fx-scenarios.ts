@@ -14,6 +14,18 @@ const BASIS_LABEL: Record<FxScenarioBasis, string> = {
   fallback: "Fallback fixture FX"
 };
 
+function selectFxSourceAmount(candidate: MatchCandidate, targetCurrency: MoneyAmount["currency"]): MoneyAmount | null {
+  const expectedAmount = candidate.expectedPayment?.amountDue ?? null;
+  const proofSourceAmount = candidate.proof?.financialPayload.sourceAmount ?? null;
+  const proofPaidAmount = candidate.proof?.financialPayload.paidAmount ?? null;
+
+  if (expectedAmount && expectedAmount.currency !== targetCurrency) return expectedAmount;
+  if (proofSourceAmount && proofSourceAmount.currency !== targetCurrency) return proofSourceAmount;
+  if (proofPaidAmount && proofPaidAmount.currency !== targetCurrency) return proofPaidAmount;
+
+  return expectedAmount ?? proofSourceAmount ?? proofPaidAmount;
+}
+
 export function calculateFxScenarios(input: {
   candidate: MatchCandidate;
   policy: ReconciliationPolicy;
@@ -24,8 +36,7 @@ export function calculateFxScenarios(input: {
   const bankAmount = bankTransaction.amount;
   const targetCurrency = bankAmount.currency;
 
-  const foreignAmount: MoneyAmount | null =
-    proof?.financialPayload.paidAmount ?? expectedPayment?.amountDue ?? null;
+  const foreignAmount = selectFxSourceAmount(candidate, targetCurrency);
 
   if (!foreignAmount) {
     return {

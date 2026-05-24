@@ -195,7 +195,12 @@ export function runReconciliationOrchestrator(
       );
       if (!residual.ok) continue;
 
-      const fee = evaluateFeeHypothesis({ residual: residual.data, policy });
+      const fee = recordToolCall(
+        timeline,
+        evaluateFeeHypothesis({ residual: residual.data, policy }),
+        `candidate ${candidate.candidateId}`,
+        { caseId, candidateId: candidate.candidateId }
+      );
       if (!fee.ok) continue;
 
       const scored = recordToolCall(

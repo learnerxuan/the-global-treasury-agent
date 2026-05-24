@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { NormalizedInputBatch } from "../../lib/recon/types";
 import type { OrchestratorOutput, ReconciliationResult } from "../../lib/recon/reconciliation/types";
 import { BatchSummaryCards } from "./BatchSummaryCards";
@@ -8,6 +8,7 @@ import { CaseDetailModal } from "./CaseDetailModal";
 import {
   buildRecordIndex,
   formatPercent,
+  pickDefaultCaseId,
   statusClass,
   statusLabel,
   type CaseReviewState,
@@ -83,10 +84,17 @@ export function ReconciliationDashboard({
   batch: NormalizedInputBatch;
 }) {
   const index = useMemo(() => buildRecordIndex(batch), [batch]);
-  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
+  const [openCaseId, setOpenCaseId] = useState<string | null>(() => pickDefaultCaseId(output.results));
   const [reviewState, setReviewState] = useState<Record<string, CaseReviewState>>({});
 
   const reviewByCase = useMemo(() => new Set(output.humanReviewRequests.map((r) => r.caseId)), [output]);
+  const defaultCaseId = useMemo(() => pickDefaultCaseId(output.results), [output.results]);
+
+  useEffect(() => {
+    if (!openCaseId || !output.results.some((result) => result.caseId === openCaseId)) {
+      setOpenCaseId(defaultCaseId);
+    }
+  }, [defaultCaseId, openCaseId, output.results]);
 
   if (output.results.length === 0) {
     return (

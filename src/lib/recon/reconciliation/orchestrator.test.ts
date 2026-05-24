@@ -75,6 +75,7 @@ describe("runReconciliationOrchestrator", () => {
     expect(output.timeline.some((e) => e.eventType === "TOOL_RESULT")).toBe(true);
     expect(output.timeline.some((e) => e.eventType === "CLASSIFICATION_COMPLETED")).toBe(true);
     expect(output.timeline.some((e) => e.toolName === "calculateFxScenarios")).toBe(true);
+    expect(output.timeline.some((e) => e.toolName === "evaluateFeeHypothesis")).toBe(true);
     // Steps are sequential starting at 1.
     expect(output.timeline[0]!.step).toBe(1);
   });

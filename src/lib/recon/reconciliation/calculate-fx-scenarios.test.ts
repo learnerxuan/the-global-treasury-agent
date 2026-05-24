@@ -12,11 +12,13 @@ import type { MatchCandidate } from "./types";
 // Build a candidate by overriding fields on real normalized fixture records.
 function buildCandidate(overrides: {
   paidAmount?: { value: string; currency: "MYR" | "USD" | "SGD" | "EUR" };
+  expectedAmount?: { value: string; currency: "MYR" | "USD" | "SGD" | "EUR" };
   paymentDate?: string;
   bankAmount?: { value: string; currency: "MYR" | "USD" | "SGD" | "EUR" };
   bankDate?: string;
   issueDate?: string;
   proofRate?: ExchangeRateInformation | null;
+  includeExpected?: boolean;
 }): MatchCandidate {
   const baseProof = cleanNormalizedBatch.paymentProofs[0]!;
   const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
@@ -41,23 +43,31 @@ function buildCandidate(overrides: {
     bookingDate: overrides.bankDate ?? baseBank.bookingDate
   };
 
-  const expectedPayment = { ...baseExpected, issueDate: overrides.issueDate ?? baseExpected.issueDate };
+  const expectedPayment = overrides.includeExpected === false
+    ? undefined
+    : {
+        ...baseExpected,
+        issueDate: overrides.issueDate ?? baseExpected.issueDate,
+        amountDue: overrides.expectedAmount ?? baseExpected.amountDue,
+        invoiceCurrency: (overrides.expectedAmount ?? baseExpected.amountDue).currency
+      };
 
   return {
     candidateId: "CAND-001",
     bankTransactionId: bankTransaction.internalTxId,
     proofId: proof.proofId,
-    expectedPaymentId: expectedPayment.expectedPaymentId,
+    ...(expectedPayment ? { expectedPaymentId: expectedPayment.expectedPaymentId } : {}),
     signals: [],
     bankTransaction,
     proof,
-    expectedPayment
+    ...(expectedPayment ? { expectedPayment } : {})
   };
 }
 
 describe("calculateFxScenarios", () => {
   it("evaluates invoice/payment/bank-date scenarios and finds the lowest residual", () => {
     const candidate = buildCandidate({
+      expectedAmount: { value: "10000", currency: "USD" },
       paidAmount: { value: "10000", currency: "USD" },
       paymentDate: "2026-05-20", // USD/MYR 4.2500 -> 42500.00 (residual 0)
       bankAmount: { value: "42500.00", currency: "MYR" },
@@ -84,6 +94,7 @@ describe("calculateFxScenarios", () => {
 
   it("prefers an explicit proof FX rate as its own scenario", () => {
     const candidate = buildCandidate({
+      expectedAmount: { value: "10000", currency: "USD" },
       paidAmount: { value: "10000", currency: "USD" },
       paymentDate: "2026-05-20",
       bankAmount: { value: "42500.00", currency: "MYR" },
@@ -111,6 +122,36 @@ describe("calculateFxScenarios", () => {
     expect(proofScenario?.residualAmount).toBe("0.00");
   });
 
+  it("uses the invoice foreign amount when the proof paid amount is already local currency", () => {
+    const candidate = buildCandidate({
+      expectedAmount: { value: "10000", currency: "USD" },
+      paidAmount: { value: "42500", currency: "MYR" },
+      paymentDate: "2026-05-21",
+      bankAmount: { value: "42500", currency: "MYR" },
+      bankDate: "2026-05-21",
+      issueDate: "2026-05-20",
+      proofRate: {
+        unitCurrency: "USD",
+        quotedCurrency: "MYR",
+        exchangeRate: "4.2500",
+        rateType: "AGREED",
+        source: "payment_proof",
+        contractId: null,
+        evidenceText: "1 USD = 4.2500 MYR"
+      }
+    });
+
+    const result = calculateFxScenarios({ candidate, policy: DEFAULT_POLICY });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const proofScenario = result.data.find((s) => s.basis === "proof_rate");
+    expect(proofScenario?.foreignAmount).toEqual({ value: "10000", currency: "USD" });
+    expect(proofScenario?.expectedLocalAmount).toEqual({ value: "42500.00", currency: "MYR" });
+    expect(proofScenario?.residualAmount).toBe("0.00");
+    expect(result.data.some((s) => s.rateSource === "same_currency")).toBe(false);
+  });
+
   it("handles same-currency candidates with a zero residual", () => {
     // Clean fixture: proof USD 250.00, bank USD 250.00.
     const candidate = buildCandidate({});
@@ -130,7 +171,8 @@ describe("calculateFxScenarios", () => {
     const candidate = buildCandidate({
       paidAmount: { value: "100", currency: "EUR" },
       bankAmount: { value: "150.00", currency: "SGD" }, // EUR->SGD not in fixture
-      proofRate: null
+      proofRate: null,
+      includeExpected: false
     });
 
     const result = calculateFxScenarios({ candidate, policy: DEFAULT_POLICY });
