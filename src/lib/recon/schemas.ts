@@ -193,52 +193,61 @@ export const paymentProofInputDescriptorSchema = inputFileDescriptorSchema.exten
   imageQuality: z.enum(["high", "medium", "low", "unknown"])
 }).strict();
 
-export const paymentProofFinancialPayloadSchema = z
-  .object({
-    documentType: z.enum([
-      "provider_receipt",
-      "bank_advice",
-      "swift_confirmation",
-      "remittance_advice",
-      "internal_transfer_slip",
-      "other"
-    ]),
-    paymentStatus: z.enum(["ACSC", "ACSP", "PNDG", "RJCT", "CANC", "UNKNOWN"]),
-    paymentStatusLabel: z.string().nullable(),
-    rawPaymentStatus: z.string().nullable(),
-    debtor: rawExtractedPartySchema,
-    creditor: rawExtractedPartySchema,
-    debtorAccount: accountIdentifierSchema.nullable(),
-    creditorAccount: accountIdentifierSchema.nullable(),
-    paidAmount: moneyAmountSchema.nullable(),
-    paymentDate: reconDateSchema.nullable(),
-    valueDate: reconDateSchema.nullable(),
-    bookingDate: reconDateSchema.nullable(),
-    reference: rawExtractedReferenceSchema,
-    providerTransactionId: z.string().nullable(),
-    providerOrBankName: z.string().nullable(),
-    invoiceIds: z.array(z.string()),
-    endToEndId: z.string().nullable(),
-    uetr: z.string().nullable(),
-    feeAmount: moneyAmountSchema.nullable(),
-    netAmount: moneyAmountSchema.nullable(),
-    sourceAmount: moneyAmountSchema.nullable(),
-    targetAmount: moneyAmountSchema.nullable(),
-    exchangeRateInformation: exchangeRateInformationSchema.nullable(),
-    remittanceInformation: remittanceInformationSchema,
-    rawText: z.string().nullable()
-  })
-  .superRefine((payload, ctx) => {
-    if (payload.exchangeRateInformation?.rateType === "IMPLIED") {
-      if (!payload.sourceAmount || !payload.targetAmount) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "IMPLIED exchange rate requires sourceAmount and targetAmount",
-          path: ["exchangeRateInformation"]
-        });
-      }
+const paymentProofFinancialPayloadBaseSchema = z.object({
+  documentType: z.enum([
+    "provider_receipt",
+    "bank_advice",
+    "swift_confirmation",
+    "remittance_advice",
+    "internal_transfer_slip",
+    "other"
+  ]),
+  paymentStatus: z.enum(["ACSC", "ACSP", "PNDG", "RJCT", "CANC", "UNKNOWN"]),
+  paymentStatusLabel: z.string().nullable(),
+  rawPaymentStatus: z.string().nullable(),
+  debtor: rawExtractedPartySchema,
+  creditor: rawExtractedPartySchema,
+  debtorAccount: accountIdentifierSchema.nullable(),
+  creditorAccount: accountIdentifierSchema.nullable(),
+  paidAmount: moneyAmountSchema.nullable(),
+  paymentDate: reconDateSchema.nullable(),
+  valueDate: reconDateSchema.nullable(),
+  bookingDate: reconDateSchema.nullable(),
+  reference: rawExtractedReferenceSchema,
+  providerTransactionId: z.string().nullable(),
+  providerOrBankName: z.string().nullable(),
+  invoiceIds: z.array(z.string()),
+  endToEndId: z.string().nullable(),
+  uetr: z.string().nullable(),
+  feeAmount: moneyAmountSchema.nullable(),
+  netAmount: moneyAmountSchema.nullable(),
+  sourceAmount: moneyAmountSchema.nullable(),
+  targetAmount: moneyAmountSchema.nullable(),
+  exchangeRateInformation: exchangeRateInformationSchema.nullable(),
+  remittanceInformation: remittanceInformationSchema,
+  rawText: z.string().nullable()
+});
+
+export const paymentProofFinancialPayloadSchema = paymentProofFinancialPayloadBaseSchema.superRefine((payload, ctx) => {
+  if (payload.exchangeRateInformation?.rateType === "IMPLIED") {
+    if (!payload.sourceAmount || !payload.targetAmount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "IMPLIED exchange rate requires sourceAmount and targetAmount",
+        path: ["exchangeRateInformation"]
+      });
     }
-  });
+  }
+});
+
+export const aiMetadataSchema = z.object({
+  extractionRoute: z.enum(["parse_pdf_text", "parse_pdf_table", "parse_image_ocr", "manual_correction"]),
+  overallConfidence: z.number().min(0).max(1),
+  fieldConfidence: z.record(z.number().min(0).max(1)),
+  evidenceSpans: z.array(fieldEvidenceSchema),
+  requiresManualReview: z.boolean(),
+  warnings: z.array(warningSchema)
+});
 
 export const paymentProofExtractionOutputSchema = z
   .object({
@@ -246,14 +255,7 @@ export const paymentProofExtractionOutputSchema = z
     proofId: z.string(),
     sourceFileId: z.string(),
     financialPayload: paymentProofFinancialPayloadSchema,
-    aiMetadata: z.object({
-      extractionRoute: z.enum(["parse_pdf_text", "parse_pdf_table", "parse_image_ocr", "manual_correction"]),
-      overallConfidence: z.number().min(0).max(1),
-      fieldConfidence: z.record(z.number().min(0).max(1)),
-      evidenceSpans: z.array(fieldEvidenceSchema),
-      requiresManualReview: z.boolean(),
-      warnings: z.array(warningSchema)
-    })
+    aiMetadata: aiMetadataSchema
   })
   .superRefine((output, ctx) => {
     if (output.financialPayload.paymentStatus !== "ACSC" && !output.aiMetadata.requiresManualReview) {
@@ -275,4 +277,60 @@ export const inputBatchSchema = z.object({
   paymentProofInputs: z.array(paymentProofInputDescriptorSchema),
   paymentProofExtractions: z.array(paymentProofExtractionOutputSchema),
   warnings: z.array(warningSchema)
+});
+
+export const timelineEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  agent: z.enum(["Extraction Agent", "Code Tools"]),
+  action: z.string(),
+  toolName: z.string().optional(),
+  inputSummary: z.string(),
+  resultSummary: z.string(),
+  reasoning: z.string(),
+  observedConfidence: z.number().min(0).max(1).optional(),
+  warnings: z.array(warningSchema)
+});
+
+export const normalizedPaymentProofFinancialPayloadSchema = paymentProofFinancialPayloadBaseSchema
+  .omit({ debtor: true, creditor: true, reference: true })
+  .extend({
+    debtor: normalizedPartySchema,
+    creditor: normalizedPartySchema,
+    reference: paymentReferenceSchema
+  })
+  .superRefine((payload, ctx) => {
+    if (payload.exchangeRateInformation?.rateType === "IMPLIED") {
+      if (!payload.sourceAmount || !payload.targetAmount) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "IMPLIED exchange rate requires sourceAmount and targetAmount",
+          path: ["exchangeRateInformation"]
+        });
+      }
+    }
+  });
+
+export const normalizedPaymentProofRecordSchema = z.object({
+  schemaVersion: schemaVersionLiteral,
+  proofId: z.string(),
+  sourceFileId: z.string(),
+  financialPayload: normalizedPaymentProofFinancialPayloadSchema,
+  aiMetadata: aiMetadataSchema,
+  normalizationMetadata: z.object({
+    normalizedAt: isoDateTimeSchema,
+    toolsUsed: z.array(z.enum(["normalize_party_name", "normalize_reference", "normalize_date"])),
+    warnings: z.array(warningSchema)
+  })
+});
+
+export const normalizedInputBatchSchema = z.object({
+  schemaVersion: schemaVersionLiteral,
+  batchId: z.string(),
+  uploadedAt: isoDateTimeSchema,
+  expectedPayments: z.array(expectedPaymentRecordSchema),
+  bankTransactions: z.array(bankStatementTransactionSchema),
+  paymentProofs: z.array(normalizedPaymentProofRecordSchema),
+  warnings: z.array(warningSchema),
+  timelines: z.array(timelineEventSchema)
 });
