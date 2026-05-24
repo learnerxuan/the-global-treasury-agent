@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type {
   accountIdentifierSchema,
+  aiMetadataSchema,
   bankStatementTransactionSchema,
   exchangeRateInformationSchema,
   expectedPaymentRecordSchema,
@@ -9,6 +10,10 @@ import type {
   inputBatchSchema,
   inputFileDescriptorSchema,
   mvpCurrencySchema,
+  normalizedInputBatchSchema,
+  normalizedPaymentProofFinancialPayloadSchema,
+  normalizedPaymentProofRecordSchema,
+  normalizedPartySchema,
   paymentProofExtractionOutputSchema,
   paymentProofFinancialPayloadSchema,
   paymentProofInputDescriptorSchema,
@@ -16,6 +21,7 @@ import type {
   rawExtractedPartySchema,
   rawExtractedReferenceSchema,
   remittanceInformationSchema,
+  timelineEventSchema,
   warningCodeSchema,
   warningSchema
 } from "./schemas";
@@ -27,6 +33,7 @@ export type FieldEvidence = z.infer<typeof fieldEvidenceSchema>;
 export type MoneyAmount = { value: string; currency: CurrencyCode };
 export type AccountIdentifier = z.infer<typeof accountIdentifierSchema>;
 export type PaymentReference = z.infer<typeof paymentReferenceSchema>;
+export type NormalizedParty = z.infer<typeof normalizedPartySchema>;
 export type RawExtractedParty = z.infer<typeof rawExtractedPartySchema>;
 export type RawExtractedReference = z.infer<typeof rawExtractedReferenceSchema>;
 export type RemittanceInformation = z.infer<typeof remittanceInformationSchema>;
@@ -38,4 +45,9 @@ export type BankStatementTransaction = z.infer<typeof bankStatementTransactionSc
 export type PaymentProofInputDescriptor = z.infer<typeof paymentProofInputDescriptorSchema>;
 export type PaymentProofFinancialPayload = z.infer<typeof paymentProofFinancialPayloadSchema>;
 export type PaymentProofExtractionOutput = z.infer<typeof paymentProofExtractionOutputSchema>;
+export type ProofAiMetadata = z.infer<typeof aiMetadataSchema>;
 export type InputBatch = z.infer<typeof inputBatchSchema>;
+export type TimelineEvent = z.infer<typeof timelineEventSchema>;
+export type NormalizedPaymentProofFinancialPayload = z.infer<typeof normalizedPaymentProofFinancialPayloadSchema>;
+export type NormalizedPaymentProofRecord = z.infer<typeof normalizedPaymentProofRecordSchema>;
+export type NormalizedInputBatch = z.infer<typeof normalizedInputBatchSchema>;
