@@ -6,6 +6,9 @@ import { extractImageText } from "../../lib/recon/extraction/image-ocr";
 import { extractPdfText } from "../../lib/recon/extraction/pdf-text";
 import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocumentExtraction, type StructuredExtractor } from "../../lib/recon/extraction/structured-extractor";
 import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
+import { runReconciliationOrchestrator } from "../../lib/recon/reconciliation/orchestrator";
+import type { OrchestratorOutput } from "../../lib/recon/reconciliation/types";
+import { buildAgentActivity, type AgentActivityEvent } from "./agent-activity";
 import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
 import type {
   BankStatementTransaction,
@@ -74,6 +77,13 @@ export type ReconciliationExtractionResponse = {
     parsedInputBatch: InputBatch;
     normalizedInputBatch: NormalizedInputBatch;
   };
+  // Agent 2 reconciliation result. null only if the orchestrator threw, in
+  // which case reconciliationError carries the message and extraction JSON stays
+  // available (see UI plan §14).
+  reconciliation: OrchestratorOutput | null;
+  reconciliationError: string | null;
+  // Unified, ordered process feed: Extraction Agent -> Code Tools -> Agent 2.
+  agentActivity: AgentActivityEvent[];
 };
 
 export type ReconciliationExtractionOptions = {
@@ -602,6 +612,17 @@ export async function extractReconciliationDocuments(
     payment_proof: proofExtractions
   };
   const parsedInputBatch = buildParsedInputBatch({ batchId, uploadedAt, documents, extractions });
+  const normalizedInputBatch = normalizeInputBatch(parsedInputBatch);
+
+  let reconciliation: OrchestratorOutput | null = null;
+  let reconciliationError: string | null = null;
+  try {
+    reconciliation = runReconciliationOrchestrator(normalizedInputBatch);
+  } catch (error) {
+    reconciliationError = error instanceof Error ? error.message : "Reconciliation failed before classification.";
+  }
+
+  const agentActivity = buildAgentActivity({ documents, extractions, normalizedInputBatch, reconciliation });
 
   return {
     batchId,
@@ -610,7 +631,10 @@ export async function extractReconciliationDocuments(
     extractions,
     codeTools: {
       parsedInputBatch,
-      normalizedInputBatch: normalizeInputBatch(parsedInputBatch)
-    }
+      normalizedInputBatch
+    },
+    reconciliation,
+    reconciliationError,
+    agentActivity
   };
 }

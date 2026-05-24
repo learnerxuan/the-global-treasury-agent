@@ -13,7 +13,8 @@ This folder contains the current planning and handoff documents for the Global T
 7. [AGENT_2_RECONCILIATION_ORCHESTRATOR_PLAN.md](AGENT_2_RECONCILIATION_ORCHESTRATOR_PLAN.md) - final Agent 2 + Reconciliation Tools implementation spec.
 8. [AGENT_2_RECONCILIATION_TODO.md](AGENT_2_RECONCILIATION_TODO.md) - implementation checklist for Agent 2 and Reconciliation Tools.
 9. [OPUS_AGENT_2_IMPLEMENTATION_HANDOFF.md](OPUS_AGENT_2_IMPLEMENTATION_HANDOFF.md) - concise implementation handoff for Claude Opus / Agent 2 coding.
-10. [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) - local environment setup for NVIDIA now and Chutes later.
+10. [05_ARTIFACTS_AND_HUMAN_REVIEW_UI_PLAN.md](05_ARTIFACTS_AND_HUMAN_REVIEW_UI_PLAN.md) - lane 5 UI plan for artifacts, human review, timeline, and dashboard behavior.
+11. [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) - local environment setup for NVIDIA now and Chutes later.
 
 ## Ownership
 
