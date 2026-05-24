@@ -273,6 +273,22 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.selected-file strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+
+.selected-file ul,
+.result-body ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.selected-file li + li {
+  margin-top: 4px;
+}
+
 .primary-button {
   min-height: 46px;
   padding: 0 18px;
@@ -315,6 +331,22 @@ h2 {
 
 .summary-row strong {
   color: var(--ink);
+}
+
+.extraction-list {
+  display: grid;
+  gap: 12px;
+}
+
+.extraction-item {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.extraction-item .mini-grid div {
+  background: white;
 }
 
 .mini-grid {

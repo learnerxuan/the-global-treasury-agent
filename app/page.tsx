@@ -18,16 +18,16 @@ type ExtractionResult = {
 type ApiResult = {
   batchId: string;
   uploadedAt: string;
-  documents: Record<DocumentRole, { fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>;
-  extractions: Record<DocumentRole, ExtractionResult>;
+  documents: Record<DocumentRole, Array<{ fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>>;
+  extractions: Record<DocumentRole, ExtractionResult[]>;
 };
 
-type UploadKey = "invoice" | "bankStatement" | "paymentProof";
+type UploadKey = "invoices" | "bankStatements" | "paymentProofs";
 
 const uploadCards: Array<{ key: UploadKey; role: DocumentRole; eyebrow: string; title: string; copy: string }> = [
-  { key: "invoice", role: "invoice", eyebrow: "Expected payment source", title: "Invoice / Expected Payment", copy: "PDF, image, XLSX, CSV, or TXT" },
-  { key: "bankStatement", role: "bank_statement", eyebrow: "Cash movement source", title: "Bank Statement", copy: "PDF, image, XLSX, CSV, or TXT" },
-  { key: "paymentProof", role: "payment_proof", eyebrow: "Customer evidence", title: "Payment Proof", copy: "PDF, image, XLSX, CSV, or TXT" }
+  { key: "invoices", role: "invoice", eyebrow: "Expected payment sources", title: "Invoices / Expected Payments", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" },
+  { key: "bankStatements", role: "bank_statement", eyebrow: "Cash movement sources", title: "Bank Statements", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" },
+  { key: "paymentProofs", role: "payment_proof", eyebrow: "Customer evidence", title: "Payment Proofs", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" }
 ];
 
 const roleLabels: Record<DocumentRole, string> = {
@@ -42,13 +42,20 @@ function recordCount(result: ExtractionResult): number {
   return result.paymentProofs.length;
 }
 
-function formatFile(file?: File): string {
-  if (!file) return "No file selected";
+function totalRecordCount(results: ExtractionResult[]): number {
+  return results.reduce((total, result) => total + recordCount(result), 0);
+}
+
+function formatFile(file: File): string {
   return `${file.name} - ${file.type || "unknown type"} - ${Math.ceil(file.size / 1024)} KB`;
 }
 
 export default function Home() {
-  const [files, setFiles] = useState<Partial<Record<UploadKey, File>>>({});
+  const [files, setFiles] = useState<Record<UploadKey, File[]>>({
+    invoices: [],
+    bankStatements: [],
+    paymentProofs: []
+  });
   const [status, setStatus] = useState<"ready" | "pending" | "readyDone" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResult | null>(null);
@@ -65,16 +72,18 @@ export default function Home() {
     setError(null);
 
     for (const card of uploadCards) {
-      if (!files[card.key]) {
+      if (files[card.key].length === 0) {
         setStatus("error");
-        setError("Select all three documents before extraction.");
+        setError("Upload at least one file for invoices, bank statements, and payment proofs.");
         return;
       }
     }
 
     const formData = new FormData();
     for (const card of uploadCards) {
-      formData.append(card.key, files[card.key] as File);
+      for (const file of files[card.key]) {
+        formData.append(card.key, file);
+      }
     }
 
     setStatus("pending");
@@ -99,14 +108,14 @@ export default function Home() {
       <header className="topbar">
         <div>
           <p className="eyebrow">ReconPilot MVP</p>
-          <h1>Three-Document Extraction</h1>
+          <h1>Batch Extraction</h1>
           <p className="lede">
-            Upload the three source documents used by the MVP. The API stores the files, prepares readable evidence, and Chutes selects the extraction route for each document before returning structured finance JSON.
+            Upload invoices, bank statements, and customer payment proofs in batches. The API stores every file, prepares readable evidence, and the AI extraction provider selects the extraction route for each document before returning structured finance JSON.
           </p>
         </div>
         <div className="rule-card">
           <span className="rule-label">MVP boundary</span>
-          <span>In a company deployment, invoices and bank rows usually arrive through system integrations. This MVP keeps the same API boundary while letting the browser provide all three source files.</span>
+          <span>In a company deployment, invoices and bank rows usually arrive through system integrations. This MVP keeps the same batch API boundary while letting the browser provide many source files.</span>
         </div>
       </header>
 
@@ -128,12 +137,20 @@ export default function Home() {
                 <span className="drop-copy">{card.copy}</span>
                 <input
                   type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.csv,.xlsx,application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  onChange={(event) => setFiles((current) => ({ ...current, [card.key]: event.target.files?.[0] }))}
+                  multiple
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.md,.markdown,.csv,.xlsx,application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={(event) => setFiles((current) => ({ ...current, [card.key]: Array.from(event.target.files ?? []) }))}
                 />
               </label>
               <div className="selected-file">
-                <span>{formatFile(files[card.key])}</span>
+                <strong>{files[card.key].length === 0 ? "No files selected" : `${files[card.key].length} selected`}</strong>
+                {files[card.key].length > 0 ? (
+                  <ul>
+                    {files[card.key].map((file) => (
+                      <li key={`${file.name}-${file.size}`}>{formatFile(file)}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             </article>
           ))}
@@ -148,7 +165,7 @@ export default function Home() {
             {statusCopy}
           </span>
           <button className="primary-button" disabled={status === "pending"} type="submit">
-            Extract all documents
+            Extract all files
           </button>
         </section>
       </form>
@@ -159,39 +176,49 @@ export default function Home() {
         {(["invoice", "bank_statement", "payment_proof"] as DocumentRole[]).map((role) => {
           const extraction = result?.extractions[role];
           const document = result?.documents[role];
-          const title = role === "invoice" ? "Invoice Extraction" : role === "bank_statement" ? "Bank Statement Extraction" : "Payment Proof Extraction";
+          const title = role === "invoice" ? "Invoice Extractions" : role === "bank_statement" ? "Bank Statement Extractions" : "Payment Proof Extractions";
           return (
             <article className="panel result-panel" key={role}>
               <p className="eyebrow">{title}</p>
-              {extraction ? (
+              {extraction && document ? (
                 <div className="result-body">
                   <div className="summary-row">
-                    <strong>{Math.round(extraction.confidence * 100)}% confidence</strong>
-                    <span>{recordCount(extraction)} records</span>
+                    <strong>{extraction.length} files</strong>
+                    <span>{totalRecordCount(extraction)} records</span>
                   </div>
-                  <p>{extraction.summary}</p>
-                  <dl className="mini-grid">
-                    <div>
-                      <dt>Selected tool</dt>
-                      <dd>{extraction.selectedTool}</dd>
-                    </div>
-                    <div>
-                      <dt>Source</dt>
-                      <dd>{document?.fileName}</dd>
-                    </div>
-                    <div>
-                      <dt>Observed text</dt>
-                      <dd>{document?.readableTextLength} chars</dd>
-                    </div>
-                  </dl>
-                  {extraction.warnings.length > 0 ? (
-                    <ul>{extraction.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                  ) : (
-                    <p>No extraction warnings.</p>
-                  )}
+                  <div className="extraction-list">
+                    {extraction.map((item, index) => (
+                      <section className="extraction-item" key={`${item.role}-${document[index]?.fileName ?? index}`}>
+                        <div className="summary-row">
+                          <strong>{Math.round(item.confidence * 100)}% confidence</strong>
+                          <span>{recordCount(item)} records</span>
+                        </div>
+                        <p>{item.summary}</p>
+                        <dl className="mini-grid">
+                          <div>
+                            <dt>Selected tool</dt>
+                            <dd>{item.selectedTool}</dd>
+                          </div>
+                          <div>
+                            <dt>Source</dt>
+                            <dd>{document[index]?.fileName}</dd>
+                          </div>
+                          <div>
+                            <dt>Observed text</dt>
+                            <dd>{document[index]?.readableTextLength ?? 0} chars</dd>
+                          </div>
+                        </dl>
+                        {item.warnings.length > 0 ? (
+                          <ul>{item.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                        ) : (
+                          <p>No extraction warnings.</p>
+                        )}
+                      </section>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="result-body empty">Waiting for {roleLabels[role]} extraction.</div>
+                <div className="result-body empty">Waiting for {roleLabels[role]} batch extraction.</div>
               )}
             </article>
           );
