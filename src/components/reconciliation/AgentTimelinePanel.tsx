@@ -19,14 +19,13 @@ export function AgentTimelinePanel({
   const events = showAll ? output.timeline : output.timeline.filter((event) => eventMatchesCase(event, selectedCaseId));
 
   return (
-    <section className="panel recon-timeline" aria-label="Agent activity timeline">
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">Agent Activity Timeline</p>
-          <h2>How Agent 2 reached each decision</h2>
-        </div>
-        <button type="button" className="recon-btn recon-btn-secondary" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "Show selected case" : "Show full batch"}
+    <section aria-label="Agent activity timeline">
+      <div className="panel-header" style={{ marginBottom: 10 }}>
+        <p className="modal-section-title eyebrow" style={{ margin: 0 }}>
+          Agent timeline
+        </p>
+        <button type="button" className="recon-btn" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "This case only" : "Full batch"}
         </button>
       </div>
 

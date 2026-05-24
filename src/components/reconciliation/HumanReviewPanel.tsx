@@ -18,13 +18,8 @@ export function HumanReviewPanel({
 }) {
   if (reviewRequests.length === 0) {
     return (
-      <section className="panel recon-review" aria-label="Human review">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Human Review</p>
-            <h2>No review required</h2>
-          </div>
-        </div>
+      <section aria-label="Human review">
+        <p className="modal-section-title eyebrow">Human review</p>
         <p className="recon-empty">
           {result.status === "AUTO_MATCHED"
             ? "This case auto-matched with no hard review flags."
@@ -37,12 +32,11 @@ export function HumanReviewPanel({
   const isLikely = result.status === "LIKELY_MATCHED";
 
   return (
-    <section className="panel recon-review" aria-label="Human review">
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">Human Review</p>
-          <h2>{reviewRequests.length} review task{reviewRequests.length === 1 ? "" : "s"}</h2>
-        </div>
+    <section aria-label="Human review">
+      <div className="panel-header" style={{ marginBottom: 10 }}>
+        <p className="modal-section-title eyebrow" style={{ margin: 0 }}>
+          Human review
+        </p>
         {reviewState ? <span className="recon-outcome">{outcomeLabel(reviewState.outcome)}</span> : null}
       </div>
 

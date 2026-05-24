@@ -97,12 +97,11 @@ export function ArtifactPreviewPanel({
   onAction: (action: ReviewActionInput) => void;
 }) {
   return (
-    <section className="panel recon-artifacts" aria-label="Artifact preview">
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">Artifact Preview</p>
-          <h2>Generated artifacts</h2>
-        </div>
+    <section aria-label="Artifact preview">
+      <div className="panel-header" style={{ marginBottom: 10 }}>
+        <p className="modal-section-title eyebrow" style={{ margin: 0 }}>
+          Artifacts
+        </p>
         {reviewState ? <span className="recon-outcome">{outcomeLabel(reviewState.outcome)}</span> : null}
       </div>
 

@@ -2,19 +2,16 @@
 
 import { useMemo, useState } from "react";
 import type { NormalizedInputBatch } from "../../lib/recon/types";
-import type { OrchestratorOutput } from "../../lib/recon/reconciliation/types";
-import { AgentTimelinePanel } from "./AgentTimelinePanel";
-import { ArtifactPreviewPanel } from "./ArtifactPreviewPanel";
+import type { OrchestratorOutput, ReconciliationResult } from "../../lib/recon/reconciliation/types";
 import { BatchSummaryCards } from "./BatchSummaryCards";
-import { CaseDetailPanel } from "./CaseDetailPanel";
-import { HumanReviewPanel } from "./HumanReviewPanel";
-import { ReconciliationQueue } from "./ReconciliationQueue";
+import { CaseDetailModal } from "./CaseDetailModal";
 import {
-  artifactsForCase,
   buildRecordIndex,
-  pickDefaultCaseId,
-  reviewRequestsForCase,
+  formatPercent,
+  statusClass,
+  statusLabel,
   type CaseReviewState,
+  type RecordIndex,
   type ReviewActionInput,
   type ReviewOutcome
 } from "./helpers";
@@ -36,6 +33,48 @@ function outcomeFor(action: ReviewActionInput): ReviewOutcome {
   }
 }
 
+function residualLabel(result: ReconciliationResult): string {
+  if (!result.residual || result.residual.band === "NO_SCENARIO") return "No FX scenario";
+  return `Residual ${formatPercent(result.residual.residualPercent)}`;
+}
+
+function ResultRow({
+  result,
+  index,
+  hasReview,
+  onOpen
+}: {
+  result: ReconciliationResult;
+  index: RecordIndex;
+  hasReview: boolean;
+  onOpen: () => void;
+}) {
+  const invoice = result.expectedPaymentId ? index.expectedById.get(result.expectedPaymentId)?.invoiceNumber : undefined;
+  return (
+    <button type="button" className="recon-row" onClick={onOpen}>
+      <span className={`recon-badge recon-badge-${statusClass(result.status)}`}>{statusLabel(result.status)}</span>
+      <span className="recon-row-main">
+        <span className="recon-row-line">
+          <span className="recon-row-invoice">{invoice ?? "No invoice"}</span>
+          <span className="recon-row-id">{result.bankTransactionId}</span>
+          {result.proofId ? <span className="recon-row-id">{result.proofId}</span> : null}
+        </span>
+        <span className="recon-row-sub">{residualLabel(result)}</span>
+      </span>
+      <span className="recon-row-right">
+        {hasReview ? <span className="recon-row-flag">Review</span> : null}
+        <span className="recon-row-score">
+          <b>{result.score}</b>
+          <span>score</span>
+        </span>
+        <svg className="recon-row-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
 export function ReconciliationDashboard({
   output,
   batch
@@ -44,24 +83,27 @@ export function ReconciliationDashboard({
   batch: NormalizedInputBatch;
 }) {
   const index = useMemo(() => buildRecordIndex(batch), [batch]);
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(() => pickDefaultCaseId(output.results));
+  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
   const [reviewState, setReviewState] = useState<Record<string, CaseReviewState>>({});
+
+  const reviewByCase = useMemo(() => new Set(output.humanReviewRequests.map((r) => r.caseId)), [output]);
 
   if (output.results.length === 0) {
     return (
-      <section className="panel recon-empty-panel" aria-label="Reconciliation dashboard">
-        <p className="eyebrow">Reconciliation</p>
-        <p>No inbound bank credits found. Debits are ignored for inbound payment reconciliation.</p>
+      <section className="recon-results">
+        <div className="panel">
+          <p className="eyebrow">Reconciliation</p>
+          <p style={{ margin: 0, color: "var(--ink-muted)" }}>
+            No inbound bank credits found. Debits are ignored for inbound payment reconciliation.
+          </p>
+        </div>
       </section>
     );
   }
 
-  const selectedResult = output.results.find((r) => r.caseId === selectedCaseId) ?? output.results[0]!;
-  const caseId = selectedResult.caseId;
-  const reviewRequests = reviewRequestsForCase(output, caseId);
-  const artifacts = artifactsForCase(output, caseId);
+  const openResult = output.results.find((r) => r.caseId === openCaseId) ?? null;
 
-  function handleAction(action: ReviewActionInput) {
+  function handleAction(caseId: string, action: ReviewActionInput) {
     setReviewState((current) => ({
       ...current,
       [caseId]: {
@@ -72,42 +114,36 @@ export function ReconciliationDashboard({
   }
 
   return (
-    <div className="recon-dashboard">
-      <header className="recon-dashboard-head">
-        <p className="eyebrow">Reconciliation Dashboard</p>
-        <h2>Auto-match clean cross-border payments, escalate risky discrepancies with evidence</h2>
-      </header>
+    <section className="recon-results" aria-label="Reconciliation results">
+      <div className="recon-results-head">
+        <h2>Reconciliation results</h2>
+        <p>Auto-match clean cross-border payments, escalate risky discrepancies with evidence. Click a row for full evidence and reasoning.</p>
+      </div>
 
       <BatchSummaryCards output={output} />
 
-      <div className="recon-layout">
-        <ReconciliationQueue output={output} index={index} selectedCaseId={caseId} onSelect={setSelectedCaseId} />
-        <CaseDetailPanel result={selectedResult} index={index} />
+      <div className="recon-rows">
+        {output.results.map((result) => (
+          <ResultRow
+            key={result.caseId}
+            result={result}
+            index={index}
+            hasReview={reviewByCase.has(result.caseId)}
+            onOpen={() => setOpenCaseId(result.caseId)}
+          />
+        ))}
       </div>
 
-      <div className="recon-layout">
-        <ArtifactPreviewPanel
-          artifacts={artifacts}
-          result={selectedResult}
+      {openResult ? (
+        <CaseDetailModal
+          result={openResult}
+          output={output}
           index={index}
-          reviewState={reviewState[caseId]}
-          hasReviewRequest={reviewRequests.length > 0}
-          onAction={handleAction}
+          reviewState={reviewState[openResult.caseId]}
+          onAction={(action) => handleAction(openResult.caseId, action)}
+          onClose={() => setOpenCaseId(null)}
         />
-        <HumanReviewPanel
-          reviewRequests={reviewRequests}
-          result={selectedResult}
-          reviewState={reviewState[caseId]}
-          onAction={handleAction}
-        />
-      </div>
-
-      <AgentTimelinePanel output={output} selectedCaseId={caseId} />
-
-      <details className="recon-debug">
-        <summary>Debug JSON — Agent 2 orchestrator output</summary>
-        <pre tabIndex={0}>{JSON.stringify(output, null, 2)}</pre>
-      </details>
-    </div>
+      ) : null}
+    </section>
   );
 }

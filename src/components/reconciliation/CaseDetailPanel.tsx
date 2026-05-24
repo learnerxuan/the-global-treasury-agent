@@ -1,5 +1,5 @@
 import type { ReconciliationResult } from "../../lib/recon/reconciliation/types";
-import { formatMoney, formatPercent, formatReason, statusClass, statusLabel, type RecordIndex } from "./helpers";
+import { formatMoney, formatPercent, formatReason, type RecordIndex } from "./helpers";
 
 function EvidenceComparison({ result, index }: { result: ReconciliationResult; index: RecordIndex }) {
   const expected = result.expectedPaymentId ? index.expectedById.get(result.expectedPaymentId) : undefined;
@@ -76,7 +76,7 @@ function FxReasoningPanel({ result }: { result: ReconciliationResult }) {
     return (
       <div className="recon-fx recon-fx-empty">
         <p className="eyebrow">FX Reasoning</p>
-        <p>No usable FX scenario was available. This case requires review.</p>
+        <p style={{ margin: 0 }}>No usable FX scenario was available. This case requires review.</p>
       </div>
     );
   }
@@ -84,7 +84,7 @@ function FxReasoningPanel({ result }: { result: ReconciliationResult }) {
     <div className="recon-fx">
       <p className="eyebrow">FX Reasoning</p>
       <p className="recon-fx-headline">{fx.label} best explains the received amount.</p>
-      <dl className="mini-grid recon-fx-grid">
+      <dl className="mini-grid">
         <div>
           <dt>Rate</dt>
           <dd>{fx.rate}</dd>
@@ -118,55 +118,43 @@ function FxReasoningPanel({ result }: { result: ReconciliationResult }) {
 
 function ScoreAndFlagsPanel({ result }: { result: ReconciliationResult }) {
   return (
-    <div className="recon-score">
+    <div className="recon-score-box">
       <div className="recon-score-head">
         <span className="recon-score-value">{result.score}</span>
         <span className="recon-score-max">/ 100</span>
       </div>
-      <div className="recon-score-cols">
-        <div>
-          <p className="eyebrow">Reason codes</p>
-          <ul className="recon-codes">
-            {result.reasonCodes.map((code) => (
-              <li key={code}>{formatReason(code)}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <p className="eyebrow">Hard review flags</p>
-          {result.hardReviewFlags.length === 0 ? (
-            <p className="recon-flags-none">None</p>
-          ) : (
-            <ul className="recon-flags">
-              {result.hardReviewFlags.map((flag) => (
-                <li key={flag}>{formatReason(flag)}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+      <p className="eyebrow">Reason codes</p>
+      <ul className="recon-codes">
+        {result.reasonCodes.map((code) => (
+          <li key={code}>{formatReason(code)}</li>
+        ))}
+      </ul>
+      <p className="eyebrow" style={{ marginTop: 12 }}>
+        Hard review flags
+      </p>
+      {result.hardReviewFlags.length === 0 ? (
+        <p className="recon-flags-none">None</p>
+      ) : (
+        <ul className="recon-flags">
+          {result.hardReviewFlags.map((flag) => (
+            <li key={flag}>{formatReason(flag)}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 export function CaseDetailPanel({ result, index }: { result: ReconciliationResult; index: RecordIndex }) {
   return (
-    <section className="panel recon-detail" aria-label="Selected case detail">
-      <div className="recon-detail-head">
-        <div>
-          <p className="eyebrow">{result.caseId}</p>
-          <h2>
-            <span className={`recon-badge recon-badge-${statusClass(result.status)}`}>{statusLabel(result.status)}</span>
-            <span className="recon-detail-score">Score {result.score}</span>
-          </h2>
-        </div>
-      </div>
+    <div className="recon-detail-content">
       <p className="recon-explanation">{result.explanation}</p>
+      <p className="modal-section-title eyebrow">Evidence comparison</p>
       <EvidenceComparison result={result} index={index} />
       <div className="recon-detail-split">
         <FxReasoningPanel result={result} />
         <ScoreAndFlagsPanel result={result} />
       </div>
-    </section>
+    </div>
   );
 }

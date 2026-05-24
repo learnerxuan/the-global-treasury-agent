@@ -9,7 +9,7 @@ const CARDS: Array<{ key: keyof OrchestratorOutput["summary"]; label: string; cl
 
 export function BatchSummaryCards({ output }: { output: OrchestratorOutput }) {
   return (
-    <section className="recon-summary" aria-label="Reconciliation batch summary">
+    <div>
       <div className="recon-summary-cards">
         {CARDS.map((card) => (
           <div className={`recon-stat recon-stat-${card.cls}`} key={card.key}>
@@ -18,24 +18,20 @@ export function BatchSummaryCards({ output }: { output: OrchestratorOutput }) {
           </div>
         ))}
       </div>
-      <dl className="recon-meta">
-        <div>
-          <dt>Batch ID</dt>
-          <dd>{output.batchId}</dd>
-        </div>
-        <div>
-          <dt>Bank credits processed</dt>
-          <dd>{output.results.length}</dd>
-        </div>
-        <div>
-          <dt>Artifact requests</dt>
-          <dd>{output.artifactRequests.length}</dd>
-        </div>
-        <div>
-          <dt>Human review requests</dt>
-          <dd>{output.humanReviewRequests.length}</dd>
-        </div>
-      </dl>
-    </section>
+      <p className="recon-meta">
+        <span>
+          Batch <b>{output.batchId}</b>
+        </span>
+        <span>
+          <b>{output.results.length}</b> bank credits
+        </span>
+        <span>
+          <b>{output.artifactRequests.length}</b> artifacts
+        </span>
+        <span>
+          <b>{output.humanReviewRequests.length}</b> review tasks
+        </span>
+      </p>
+    </div>
   );
 }
