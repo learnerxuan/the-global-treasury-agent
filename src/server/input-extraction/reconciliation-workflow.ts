@@ -16,6 +16,7 @@ const supportedMimeTypes = new Set([
   "image/webp",
   "image/tiff",
   "text/plain",
+  "text/markdown",
   "text/csv",
   "application/csv",
   "application/vnd.ms-excel",
@@ -29,9 +30,9 @@ export type UploadedDocument = {
 };
 
 export type ReconciliationExtractionRequest = {
-  invoice: UploadedDocument;
-  bankStatement: UploadedDocument;
-  paymentProof: UploadedDocument;
+  invoices: UploadedDocument[];
+  bankStatements: UploadedDocument[];
+  paymentProofs: UploadedDocument[];
 };
 
 export type StoredDocument = {
@@ -52,8 +53,8 @@ export type StoredDocument = {
 export type ReconciliationExtractionResponse = {
   batchId: string;
   uploadedAt: string;
-  documents: Record<DocumentRole, StoredDocument>;
-  extractions: Record<DocumentRole, StructuredDocumentExtraction>;
+  documents: Record<DocumentRole, StoredDocument[]>;
+  extractions: Record<DocumentRole, StructuredDocumentExtraction[]>;
 };
 
 export type ReconciliationExtractionOptions = {
@@ -80,7 +81,7 @@ function decodeContent(contentBase64: string): Buffer {
 
 function assertSupportedMimeType(mimeType: string): void {
   if (!supportedMimeTypes.has(mimeType)) {
-    throw new Error(`Unsupported document type: ${mimeType}. Supported types: PDF, image, CSV, and TXT.`);
+    throw new Error(`Unsupported document type: ${mimeType}. Supported types: PDF, image, XLSX, CSV, Markdown, and TXT.`);
   }
 }
 
@@ -93,6 +94,7 @@ function ensureExtension(fileName: string, mimeType: string): string {
     "image/webp": ".webp",
     "image/tiff": ".tiff",
     "text/plain": ".txt",
+    "text/markdown": ".md",
     "text/csv": ".csv",
     "application/csv": ".csv",
     "application/vnd.ms-excel": ".csv",
@@ -221,6 +223,37 @@ async function storeDocument(role: DocumentRole, upload: UploadedDocument, stora
   };
 }
 
+async function storeDocuments(role: DocumentRole, uploads: UploadedDocument[], storageDir: string): Promise<Array<{ stored: StoredDocument; text: string }>> {
+  if (uploads.length === 0) {
+    throw new Error(`Upload at least one ${role.replace("_", " ")} document.`);
+  }
+
+  const storedDocuments: Array<{ stored: StoredDocument; text: string }> = [];
+  for (const upload of uploads) {
+    storedDocuments.push(await storeDocument(role, upload, storageDir));
+  }
+  return storedDocuments;
+}
+
+async function extractStoredDocuments(
+  extractor: StructuredExtractor,
+  documents: Array<{ stored: StoredDocument; text: string }>
+): Promise<StructuredDocumentExtraction[]> {
+  const extractions: StructuredDocumentExtraction[] = [];
+  for (const document of documents) {
+    extractions.push(
+      await extractor({
+        role: document.stored.role,
+        fileName: document.stored.fileName,
+        mimeType: document.stored.mimeType,
+        text: document.text,
+        toolObservations: [...document.stored.toolObservations, ...document.stored.warnings]
+      })
+    );
+  }
+  return extractions;
+}
+
 export async function extractReconciliationDocuments(
   request: ReconciliationExtractionRequest,
   options: ReconciliationExtractionOptions = {}
@@ -228,28 +261,26 @@ export async function extractReconciliationDocuments(
   const storageDir = resolveStorageDir(options.storageDir);
   const extractor = options.extractor ?? createChutesStructuredExtractor();
 
-  const invoice = await storeDocument("invoice", request.invoice, storageDir);
-  const bankStatement = await storeDocument("bank_statement", request.bankStatement, storageDir);
-  const paymentProof = await storeDocument("payment_proof", request.paymentProof, storageDir);
+  const invoices = await storeDocuments("invoice", request.invoices, storageDir);
+  const bankStatements = await storeDocuments("bank_statement", request.bankStatements, storageDir);
+  const paymentProofs = await storeDocuments("payment_proof", request.paymentProofs, storageDir);
 
-  const [invoiceExtraction, bankExtraction, proofExtraction] = await Promise.all([
-    extractor({ role: "invoice", fileName: invoice.stored.fileName, mimeType: invoice.stored.mimeType, text: invoice.text, toolObservations: [...invoice.stored.toolObservations, ...invoice.stored.warnings] }),
-    extractor({ role: "bank_statement", fileName: bankStatement.stored.fileName, mimeType: bankStatement.stored.mimeType, text: bankStatement.text, toolObservations: [...bankStatement.stored.toolObservations, ...bankStatement.stored.warnings] }),
-    extractor({ role: "payment_proof", fileName: paymentProof.stored.fileName, mimeType: paymentProof.stored.mimeType, text: paymentProof.text, toolObservations: [...paymentProof.stored.toolObservations, ...paymentProof.stored.warnings] })
-  ]);
+  const invoiceExtractions = await extractStoredDocuments(extractor, invoices);
+  const bankExtractions = await extractStoredDocuments(extractor, bankStatements);
+  const proofExtractions = await extractStoredDocuments(extractor, paymentProofs);
 
   return {
     batchId: `batch_${randomUUID()}`,
     uploadedAt: new Date().toISOString(),
     documents: {
-      invoice: invoice.stored,
-      bank_statement: bankStatement.stored,
-      payment_proof: paymentProof.stored
+      invoice: invoices.map((document) => document.stored),
+      bank_statement: bankStatements.map((document) => document.stored),
+      payment_proof: paymentProofs.map((document) => document.stored)
     },
     extractions: {
-      invoice: invoiceExtraction,
-      bank_statement: bankExtraction,
-      payment_proof: proofExtraction
+      invoice: invoiceExtractions,
+      bank_statement: bankExtractions,
+      payment_proof: proofExtractions
     }
   };
 }
