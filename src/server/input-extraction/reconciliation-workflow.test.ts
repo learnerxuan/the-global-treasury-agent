@@ -60,6 +60,13 @@ describe("extractReconciliationDocuments", () => {
     expect(result.codeTools.normalizedInputBatch.batchId).toBe(result.batchId);
     expect(result.codeTools.normalizedInputBatch.timelines[0]?.agent).toBe("Code Tools");
 
+    // Agent 2 runs on the normalized batch and is attached to the response.
+    expect(result.reconciliationError).toBeNull();
+    expect(result.reconciliation).not.toBeNull();
+    expect(result.reconciliation?.schemaVersion).toBe("1.0.0");
+    expect(result.reconciliation?.batchId).toBe(result.batchId);
+    expect(result.reconciliation?.summary).toBeDefined();
+
     const storedInvoice = await readFile(result.documents.invoice[0]!.storageRef.uri, "utf8");
     expect(storedInvoice).toContain("INV-1001");
   });

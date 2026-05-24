@@ -1,6 +1,9 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import type { NormalizedInputBatch } from "../src/lib/recon/types";
+import type { OrchestratorOutput } from "../src/lib/recon/reconciliation/types";
+import { ReconciliationDashboard } from "../src/components/reconciliation/ReconciliationDashboard";
 
 type DocumentRole = "invoice" | "bank_statement" | "payment_proof";
 
@@ -22,8 +25,10 @@ type ApiResult = {
   extractions: Record<DocumentRole, ExtractionResult[]>;
   codeTools: {
     parsedInputBatch: unknown;
-    normalizedInputBatch: unknown;
+    normalizedInputBatch: NormalizedInputBatch;
   };
+  reconciliation: OrchestratorOutput | null;
+  reconciliationError: string | null;
 };
 
 type UploadKey = "invoices" | "bankStatements" | "paymentProofs";
@@ -236,6 +241,25 @@ export default function Home() {
           );
         })}
       </section>
+
+      {result ? (
+        <section className="recon-section" aria-label="Reconciliation results">
+          {result.reconciliation ? (
+            <ReconciliationDashboard output={result.reconciliation} batch={result.codeTools.normalizedInputBatch} />
+          ) : (
+            <div className="error-banner">
+              {result.reconciliationError ?? "Reconciliation failed before classification."} Extraction JSON remains available below.
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="recon-section" aria-label="Reconciliation placeholder">
+          <div className="panel recon-empty-panel">
+            <p className="eyebrow">Reconciliation Dashboard</p>
+            <p>Run extraction to generate match results.</p>
+          </div>
+        </section>
+      )}
 
       <section className="details-grid" aria-label="Raw API result">
         <article className="panel json-panel">
