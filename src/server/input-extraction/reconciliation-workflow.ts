@@ -5,6 +5,21 @@ import { readSheet } from "read-excel-file/node";
 import { extractImageText } from "../../lib/recon/extraction/image-ocr";
 import { extractPdfText } from "../../lib/recon/extraction/pdf-text";
 import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocumentExtraction, type StructuredExtractor } from "../../lib/recon/extraction/structured-extractor";
+import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
+import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
+import type {
+  BankStatementTransaction,
+  CurrencyCode,
+  ExpectedPaymentRecord,
+  FieldEvidence,
+  InputBatch,
+  InputFileDescriptor,
+  MoneyAmount,
+  NormalizedInputBatch,
+  PaymentProofExtractionOutput,
+  PaymentProofInputDescriptor,
+  Warning
+} from "../../lib/recon/types";
 
 const maxUploadBytes = 10 * 1024 * 1024;
 const defaultStorageDir = join(/* turbopackIgnore: true */ process.cwd(), "runtime", "uploads");
@@ -55,6 +70,10 @@ export type ReconciliationExtractionResponse = {
   uploadedAt: string;
   documents: Record<DocumentRole, StoredDocument[]>;
   extractions: Record<DocumentRole, StructuredDocumentExtraction[]>;
+  codeTools: {
+    parsedInputBatch: InputBatch;
+    normalizedInputBatch: NormalizedInputBatch;
+  };
 };
 
 export type ReconciliationExtractionOptions = {
@@ -223,6 +242,307 @@ async function storeDocument(role: DocumentRole, upload: UploadedDocument, stora
   };
 }
 
+const mvpCurrencies = new Set<CurrencyCode>(["MYR", "USD", "SGD", "EUR"]);
+
+function toCurrency(value: string | null | undefined, fallback: CurrencyCode): CurrencyCode {
+  const normalized = value?.trim().toUpperCase();
+  return normalized && mvpCurrencies.has(normalized as CurrencyCode) ? (normalized as CurrencyCode) : fallback;
+}
+
+function toMoneyAmount(value: string | null | undefined, currency: string | null | undefined, fallbackCurrency: CurrencyCode): MoneyAmount | null {
+  if (value === null || value === undefined) return null;
+  const normalizedCurrency = toCurrency(currency, fallbackCurrency);
+  const normalizedValue = normalize_currency_amount(value);
+  if (!normalizedValue) return null;
+  return { value: normalizedValue, currency: normalizedCurrency };
+}
+
+function toWarning(message: string, field: string | null): Warning {
+  return { code: "LOW_CONFIDENCE_EXTRACTION", message, field };
+}
+
+function evidence(field: string, value: string | null, source: FieldEvidence["source"], confidence: number): FieldEvidence {
+  return {
+    field,
+    value,
+    originalValue: value,
+    normalizedValue: null,
+    confidence,
+    source,
+    evidenceText: value,
+    page: source.startsWith("pdf") ? 1 : null,
+    bbox: null,
+    warnings: []
+  };
+}
+
+function sourceFromTool(tool: string): FieldEvidence["source"] {
+  if (tool === "parse_csv_text") return "csv";
+  if (tool === "parse_spreadsheet") return "xlsx";
+  if (tool === "parse_pdf_table") return "pdf_table";
+  if (tool === "parse_image_ocr") return "image_ocr";
+  if (tool === "manual_correction") return "manual";
+  return "pdf_text";
+}
+
+function inputFileDescriptor(stored: StoredDocument, inputKind: InputFileDescriptor["inputKind"], uploadedAt: string): InputFileDescriptor {
+  return {
+    schemaVersion: "1.0.0",
+    fileId: stored.documentId,
+    fileName: stored.fileName,
+    mimeType: stored.mimeType,
+    inputKind,
+    sizeBytes: stored.sizeBytes,
+    storageRef: stored.storageRef,
+    uploadedAt,
+    parseStatus: stored.warnings.length > 0 ? "NEEDS_MAPPING" : "PARSED",
+    warnings: stored.warnings.map((warning) => toWarning(warning, null))
+  };
+}
+
+function paymentProofInputDescriptor(stored: StoredDocument, uploadedAt: string): PaymentProofInputDescriptor {
+  const tableLikely = stored.toolObservations.some((observation) => observation.toLowerCase().includes("table"));
+  return {
+    ...inputFileDescriptor(stored, "payment_proof", uploadedAt),
+    mimeType: stored.mimeType as PaymentProofInputDescriptor["mimeType"],
+    inputKind: "payment_proof",
+    textLayer: stored.mimeType === "application/pdf" || stored.mimeType === "text/plain",
+    tableLikely,
+    imageQuality: stored.mimeType.startsWith("image/") ? "unknown" : "high"
+  };
+}
+
+function buildExpectedPayments(extraction: StructuredDocumentExtraction, stored: StoredDocument): ExpectedPaymentRecord[] {
+  const source = sourceFromTool(extraction.selectedTool);
+  return extraction.invoices.map((invoice, index) => {
+    const invoiceNumber = invoice.invoiceNumber ?? `UNKNOWN-${index + 1}`;
+    const issueDate = normalize_date(invoice.issueDate) ?? new Date().toISOString().slice(0, 10);
+    const dueDate = normalize_date(invoice.dueDate);
+    const amountDue = toMoneyAmount(invoice.amountDue.value, invoice.amountDue.currency, "USD") ?? { value: "0.00", currency: "USD" };
+    const rawReference = invoice.paymentReference ?? invoice.invoiceNumber;
+    const warnings = [...extraction.warnings.map((warning) => toWarning(warning, null))];
+
+    if (!invoice.invoiceNumber) warnings.push({ code: "MISSING_PAYMENT_REFERENCE", message: "Invoice number is missing.", field: "invoiceNumber" });
+    if (!invoice.customerName) warnings.push({ code: "MISSING_DEBTOR", message: "Customer/debtor name is missing.", field: "customerName" });
+    if (!invoice.amountDue.value) warnings.push({ code: "MISSING_PAID_AMOUNT", message: "Invoice amount is missing.", field: "amountDue.value" });
+
+    return {
+      schemaVersion: "1.0.0",
+      expectedPaymentId: `exp_${stored.documentId}_${String(index + 1).padStart(3, "0")}`,
+      invoiceNumber,
+      issueDate,
+      dueDate,
+      creditor: { name: null, normalizedName: null },
+      debtor: { name: invoice.customerName, normalizedName: normalize_party_name(invoice.customerName) },
+      creditorAccount: null,
+      debtorAccount: null,
+      invoiceCurrency: amountDue.currency,
+      amountDue,
+      expectedSettlementCurrency: "MYR",
+      paymentReference: { raw: rawReference, normalized: normalize_reference(rawReference) },
+      reconciliationStatus: "OPEN",
+      debtorReference: null,
+      purchaseOrderReference: null,
+      paymentTerms: null,
+      outstandingAmount: amountDue,
+      sourceFileId: stored.documentId,
+      sourceRowNumber: index + 1,
+      fieldConfidence: {
+        invoiceNumber: invoice.invoiceNumber ? extraction.confidence : 0,
+        "debtor.name": invoice.customerName ? extraction.confidence : 0,
+        "amountDue.value": invoice.amountDue.value ? extraction.confidence : 0,
+        "amountDue.currency": invoice.amountDue.currency ? extraction.confidence : 0
+      },
+      evidenceSpans: [
+        evidence("invoiceNumber", invoice.invoiceNumber, source, extraction.confidence),
+        evidence("customerName", invoice.customerName, source, extraction.confidence),
+        evidence("amountDue.value", invoice.amountDue.value, source, extraction.confidence)
+      ],
+      warnings
+    };
+  });
+}
+
+function buildBankTransactions(extraction: StructuredDocumentExtraction, stored: StoredDocument): BankStatementTransaction[] {
+  return extraction.bankTransactions.map((transaction, index) => {
+    const rawValue = transaction.amount.value ?? "0.00";
+    const isDebit = rawValue.trim().startsWith("-");
+    const absoluteValue = isDebit ? rawValue.trim().slice(1) : rawValue;
+    const amount = toMoneyAmount(absoluteValue, transaction.amount.currency, "MYR") ?? { value: "0.00", currency: "MYR" };
+    const reference = transaction.reference ?? transaction.description;
+    const invoiceNumber = normalize_reference(reference) ? transaction.reference : null;
+    const bookingDate = normalize_date(transaction.transactionDate) ?? new Date().toISOString().slice(0, 10);
+
+    return {
+      schemaVersion: "1.0.0",
+      internalTxId: `txn_${stored.documentId}_${String(index + 1).padStart(3, "0")}`,
+      accountId: "MYR_MAIN_ACCOUNT",
+      bookingDate,
+      valueDate: normalize_date(transaction.valueDate),
+      creditDebitIndicator: isDebit ? "DBIT" : "CRDT",
+      amount,
+      acctSvcrRef: transaction.reference,
+      normalizedReference: normalize_reference(reference),
+      endToEndId: null,
+      txId: null,
+      debtorName: transaction.payerName,
+      debtorNormalizedName: normalize_party_name(transaction.payerName),
+      debtorAccount: null,
+      creditorName: null,
+      creditorNormalizedName: null,
+      creditorAccount: null,
+      remittanceInformation: {
+        raw: transaction.description ?? transaction.reference,
+        structured: {
+          invoiceNumber,
+          creditorReference: transaction.reference,
+          additionalInfo: transaction.description
+        }
+      },
+      description: transaction.description,
+      rawDescription: transaction.description,
+      sourceFileId: stored.documentId,
+      sourceRowNumber: index + 1,
+      warnings: extraction.warnings.map((warning) => toWarning(warning, null))
+    };
+  });
+}
+
+function mapPaymentStatus(status: string | null): PaymentProofExtractionOutput["financialPayload"]["paymentStatus"] {
+  const normalized = status?.trim().toUpperCase();
+  if (!normalized) return "UNKNOWN";
+  if (["ACSC", "COMPLETED", "COMPLETE", "PAID", "SETTLED", "SUCCESS", "SUCCESSFUL"].includes(normalized)) return "ACSC";
+  if (["ACSP", "PROCESSING"].includes(normalized)) return "ACSP";
+  if (["PNDG", "PENDING", "SCHEDULED"].includes(normalized)) return "PNDG";
+  if (["RJCT", "REJECTED", "FAILED", "FAILURE"].includes(normalized)) return "RJCT";
+  if (["CANC", "CANCELLED", "CANCELED"].includes(normalized)) return "CANC";
+  return "UNKNOWN";
+}
+
+function parseExchangeRate(rate: string | null): PaymentProofExtractionOutput["financialPayload"]["exchangeRateInformation"] {
+  if (!rate) return null;
+  const match = rate.match(/1\s+([A-Z]{3})\s*=\s*([0-9]+(?:\.[0-9]+)?)\s+([A-Z]{3})/i);
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  return {
+    unitCurrency: toCurrency(match[1], "USD"),
+    quotedCurrency: toCurrency(match[3], "MYR"),
+    exchangeRate: match[2],
+    rateType: "AGREED",
+    source: "payment_proof",
+    contractId: null,
+    evidenceText: rate
+  };
+}
+
+function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, stored: StoredDocument): PaymentProofExtractionOutput[] {
+  const source = sourceFromTool(extraction.selectedTool);
+  return extraction.paymentProofs.map((proof, index) => {
+    const paidAmount = toMoneyAmount(proof.paidAmount.value, proof.paidAmount.currency, "MYR");
+    const paymentStatus = mapPaymentStatus(proof.paymentStatus);
+    const reference = proof.reference;
+    const fieldConfidence: Record<string, number> = {
+      "financialPayload.paidAmount.value": paidAmount ? extraction.confidence : 0,
+      "financialPayload.paidAmount.currency": paidAmount ? extraction.confidence : 0,
+      "financialPayload.paymentDate": proof.paymentDate ? extraction.confidence : 0,
+      "financialPayload.reference.raw": reference ? extraction.confidence : 0,
+      "financialPayload.debtor.rawName": proof.payerName ? extraction.confidence : 0,
+      "financialPayload.creditor.rawName": proof.creditorName ? extraction.confidence : 0
+    };
+    const warnings = [...extraction.warnings.map((warning) => toWarning(warning, null))];
+    if (!paidAmount) warnings.push({ code: "MISSING_PAID_AMOUNT", message: "Payment proof amount is missing.", field: "financialPayload.paidAmount" });
+    if (!proof.paymentDate) warnings.push({ code: "MISSING_PAYMENT_DATE", message: "Payment proof date is missing.", field: "financialPayload.paymentDate" });
+    if (!reference) warnings.push({ code: "MISSING_PAYMENT_REFERENCE", message: "Payment proof reference is missing.", field: "financialPayload.reference.raw" });
+    if (!proof.payerName) warnings.push({ code: "MISSING_DEBTOR", message: "Payment proof payer is missing.", field: "financialPayload.debtor.rawName" });
+    if (!proof.creditorName) warnings.push({ code: "MISSING_CREDITOR", message: "Payment proof creditor is missing.", field: "financialPayload.creditor.rawName" });
+
+    return {
+      schemaVersion: "1.0.0",
+      proofId: `proof_${stored.documentId}_${String(index + 1).padStart(3, "0")}`,
+      sourceFileId: stored.documentId,
+      financialPayload: {
+        documentType: "provider_receipt",
+        paymentStatus,
+        paymentStatusLabel: paymentStatus === "ACSC" ? "Settled" : proof.paymentStatus,
+        rawPaymentStatus: proof.paymentStatus,
+        debtor: { rawName: proof.payerName },
+        creditor: { rawName: proof.creditorName },
+        debtorAccount: null,
+        creditorAccount: null,
+        paidAmount,
+        paymentDate: normalize_date(proof.paymentDate),
+        valueDate: null,
+        bookingDate: null,
+        reference: { raw: reference },
+        providerTransactionId: null,
+        providerOrBankName: proof.providerOrBankName,
+        invoiceIds: reference ? [reference] : [],
+        endToEndId: null,
+        uetr: null,
+        feeAmount: null,
+        netAmount: null,
+        sourceAmount: null,
+        targetAmount: null,
+        exchangeRateInformation: parseExchangeRate(proof.exchangeRate),
+        remittanceInformation: {
+          raw: reference ? `Payment for ${reference}` : null,
+          structured: reference ? { invoiceNumber: reference } : null
+        },
+        rawText: null
+      },
+      aiMetadata: {
+        extractionRoute: extraction.selectedTool,
+        overallConfidence: extraction.confidence,
+        fieldConfidence,
+        evidenceSpans: [
+          evidence("financialPayload.paidAmount.value", proof.paidAmount.value, source, extraction.confidence),
+          evidence("financialPayload.paymentDate", proof.paymentDate, source, extraction.confidence),
+          evidence("financialPayload.reference.raw", reference, source, extraction.confidence),
+          evidence("financialPayload.debtor.rawName", proof.payerName, source, extraction.confidence),
+          evidence("financialPayload.creditor.rawName", proof.creditorName, source, extraction.confidence)
+        ],
+        requiresManualReview: extraction.confidence < 0.85 || paymentStatus !== "ACSC" || warnings.length > 0,
+        warnings
+      }
+    };
+  });
+}
+
+function buildParsedInputBatch(input: {
+  batchId: string;
+  uploadedAt: string;
+  documents: Record<DocumentRole, StoredDocument[]>;
+  extractions: Record<DocumentRole, StructuredDocumentExtraction[]>;
+}): InputBatch {
+  const invoiceFiles = input.documents.invoice.map((document) => inputFileDescriptor(document, "expected_payment_records", input.uploadedAt));
+  const bankFiles = input.documents.bank_statement.map((document) => inputFileDescriptor(document, "bank_statement", input.uploadedAt));
+  const proofFiles = input.documents.payment_proof.map((document) => paymentProofInputDescriptor(document, input.uploadedAt));
+
+  return {
+    schemaVersion: "1.0.0",
+    batchId: input.batchId,
+    uploadedAt: input.uploadedAt,
+    files: [...invoiceFiles, ...bankFiles, ...proofFiles],
+    expectedPayments: input.extractions.invoice.flatMap((extraction, index) => {
+      const stored = input.documents.invoice[index];
+      return stored ? buildExpectedPayments(extraction, stored) : [];
+    }),
+    bankTransactions: input.extractions.bank_statement.flatMap((extraction, index) => {
+      const stored = input.documents.bank_statement[index];
+      return stored ? buildBankTransactions(extraction, stored) : [];
+    }),
+    paymentProofInputs: proofFiles,
+    paymentProofExtractions: input.extractions.payment_proof.flatMap((extraction, index) => {
+      const stored = input.documents.payment_proof[index];
+      return stored ? buildPaymentProofExtractions(extraction, stored) : [];
+    }),
+    warnings: [
+      ...input.documents.invoice.flatMap((document) => document.warnings.map((warning) => toWarning(warning, "invoice"))),
+      ...input.documents.bank_statement.flatMap((document) => document.warnings.map((warning) => toWarning(warning, "bank_statement"))),
+      ...input.documents.payment_proof.flatMap((document) => document.warnings.map((warning) => toWarning(warning, "payment_proof")))
+    ]
+  };
+}
+
 async function storeDocuments(role: DocumentRole, uploads: UploadedDocument[], storageDir: string): Promise<Array<{ stored: StoredDocument; text: string }>> {
   if (uploads.length === 0) {
     throw new Error(`Upload at least one ${role.replace("_", " ")} document.`);
@@ -269,18 +589,28 @@ export async function extractReconciliationDocuments(
   const bankExtractions = await extractStoredDocuments(extractor, bankStatements);
   const proofExtractions = await extractStoredDocuments(extractor, paymentProofs);
 
+  const batchId = `batch_${randomUUID()}`;
+  const uploadedAt = new Date().toISOString();
+  const documents = {
+    invoice: invoices.map((document) => document.stored),
+    bank_statement: bankStatements.map((document) => document.stored),
+    payment_proof: paymentProofs.map((document) => document.stored)
+  };
+  const extractions = {
+    invoice: invoiceExtractions,
+    bank_statement: bankExtractions,
+    payment_proof: proofExtractions
+  };
+  const parsedInputBatch = buildParsedInputBatch({ batchId, uploadedAt, documents, extractions });
+
   return {
-    batchId: `batch_${randomUUID()}`,
-    uploadedAt: new Date().toISOString(),
-    documents: {
-      invoice: invoices.map((document) => document.stored),
-      bank_statement: bankStatements.map((document) => document.stored),
-      payment_proof: paymentProofs.map((document) => document.stored)
-    },
-    extractions: {
-      invoice: invoiceExtractions,
-      bank_statement: bankExtractions,
-      payment_proof: proofExtractions
+    batchId,
+    uploadedAt,
+    documents,
+    extractions,
+    codeTools: {
+      parsedInputBatch,
+      normalizedInputBatch: normalizeInputBatch(parsedInputBatch)
     }
   };
 }
