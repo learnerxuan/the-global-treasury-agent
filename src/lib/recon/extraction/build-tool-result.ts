@@ -1,5 +1,5 @@
-import type { FieldEvidence, PaymentProofFinancialPayload, PaymentProofInputDescriptor, Warning } from "../types.js";
-import { makeEvidence, missingFieldWarning } from "./evidence.js";
+import type { FieldEvidence, PaymentProofFinancialPayload, PaymentProofInputDescriptor, Warning } from "../types";
+import { makeEvidence, missingFieldWarning } from "./evidence";
 import {
   computeImpliedFx,
   extractAllMoney,
@@ -11,15 +11,15 @@ import {
   extractPaymentStatus,
   extractProviderOrBankName,
   extractReference
-} from "./extract-payment-fields.js";
-import type { ExtractionRoute, ExtractionToolResult } from "./tools.js";
+} from "./extract-payment-fields";
+import type { ExtractionRoute, ExtractionToolResult } from "./tools";
 
 type BuildInput = {
   descriptor: PaymentProofInputDescriptor;
   route: Exclude<ExtractionRoute, "manual_correction">;
   text: string;
   evidenceSource: FieldEvidence["source"];
-  sourceMode: "real_file" | "fixture_fallback";
+  sourceMode: "real_file" | "unreadable";
   sourceWarnings: Warning[];
 };
 

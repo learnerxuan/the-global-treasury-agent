@@ -90,7 +90,7 @@ export const fieldEvidenceSchema = z.object({
   originalValue: z.string().nullable(),
   normalizedValue: z.string().nullable(),
   confidence: z.number().min(0).max(1),
-  source: z.enum(["csv", "xlsx", "pdf_text", "pdf_table", "image_ocr", "manual", "fixture"]),
+  source: z.enum(["csv", "xlsx", "pdf_text", "pdf_table", "image_ocr", "manual"]),
   evidenceText: z.string().nullable(),
   page: z.number().int().positive().nullable(),
   bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable(),
@@ -106,12 +106,6 @@ export const remittanceInformationSchema = z.object({
       additionalInfo: z.string().nullable().optional()
     })
     .nullable()
-});
-
-export const demoFixtureSchema = z.object({
-  rawText: z.string().nullable().optional(),
-  rawTable: z.array(z.array(z.string())).nullable().optional(),
-  rawOcr: z.string().nullable().optional()
 });
 
 export const fileStorageRefSchema = z.object({
@@ -196,9 +190,8 @@ export const paymentProofInputDescriptorSchema = inputFileDescriptorSchema.exten
   inputKind: z.literal("payment_proof"),
   textLayer: z.boolean(),
   tableLikely: z.boolean(),
-  imageQuality: z.enum(["high", "medium", "low", "unknown"]),
-  demoFixture: demoFixtureSchema.optional()
-});
+  imageQuality: z.enum(["high", "medium", "low", "unknown"])
+}).strict();
 
 export const paymentProofFinancialPayloadSchema = z
   .object({

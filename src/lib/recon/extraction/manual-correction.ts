@@ -1,6 +1,6 @@
-import type { PaymentProofInputDescriptor } from "../types.js";
-import { makeEvidence, makeWarning } from "./evidence.js";
-import type { ExtractionToolResult } from "./tools.js";
+import type { PaymentProofInputDescriptor } from "../types";
+import { makeEvidence, makeWarning } from "./evidence";
+import type { ExtractionToolResult } from "./tools";
 
 export async function manualCorrection(_descriptor: PaymentProofInputDescriptor): Promise<ExtractionToolResult> {
   const warnings = [
@@ -45,6 +45,6 @@ export async function manualCorrection(_descriptor: PaymentProofInputDescriptor)
       })
     ],
     warnings,
-    sourceMode: "fixture_fallback"
+    sourceMode: "unreadable"
   };
 }

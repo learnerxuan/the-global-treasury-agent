@@ -1,8 +1,8 @@
-import { readProofSource } from "./read-proof-source.js";
-import { buildToolResult } from "./build-tool-result.js";
-import { extractImageText } from "./image-ocr.js";
-import { makeWarning } from "./evidence.js";
-import type { PaymentProofInputDescriptor } from "../types.js";
+import { readProofSource } from "./read-proof-source";
+import { buildToolResult } from "./build-tool-result";
+import { extractImageText } from "./image-ocr";
+import { makeWarning } from "./evidence";
+import type { PaymentProofInputDescriptor } from "../types";
 
 export async function parseImageOcr(descriptor: PaymentProofInputDescriptor) {
   const source = await readProofSource(descriptor);
@@ -27,7 +27,7 @@ export async function parseImageOcr(descriptor: PaymentProofInputDescriptor) {
     descriptor,
     route: "parse_image_ocr",
     text,
-    evidenceSource: source.mode === "fixture_fallback" ? "manual" : "image_ocr",
+    evidenceSource: source.mode === "unreadable" ? "manual" : "image_ocr",
     sourceMode: source.mode,
     sourceWarnings: warnings
   });

@@ -6,8 +6,11 @@ _guide_docx_unzipped/
 *.p12
 *.pfx
 node_modules/
+.next/
+*.tsbuildinfo
 dist/
 build/
+runtime/
 eng.traineddata
 .DS_Store
 Thumbs.db

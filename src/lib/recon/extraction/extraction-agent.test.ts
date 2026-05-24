@@ -1,12 +1,51 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { paymentProofExtractionOutputSchema } from "../schemas.js";
-import { proofToolFixtures } from "./fixtures.js";
-import { calculateOverallConfidence, runExtractionAgent, selectInitialRoute } from "./extraction-agent.js";
+import { paymentProofExtractionOutputSchema } from "../schemas";
+import type { PaymentProofInputDescriptor } from "../types";
+import { calculateOverallConfidence, runExtractionAgent, selectInitialRoute } from "./extraction-agent";
+
+function descriptor(overrides: Partial<PaymentProofInputDescriptor>): PaymentProofInputDescriptor {
+  return {
+    schemaVersion: "1.0.0",
+    fileId: "proof_file_test",
+    fileName: "proof.txt",
+    mimeType: "text/plain",
+    inputKind: "payment_proof",
+    sizeBytes: 128,
+    storageRef: null,
+    uploadedAt: "2026-05-23T18:31:00+08:00",
+    parseStatus: "PENDING",
+    textLayer: true,
+    tableLikely: false,
+    imageQuality: "high",
+    warnings: [],
+    ...overrides
+  };
+}
+
+async function textProofDescriptor(text: string): Promise<PaymentProofInputDescriptor> {
+  const dir = await mkdtemp(join(tmpdir(), "reconpilot-extraction-"));
+  const filePath = join(dir, "proof.txt");
+  await writeFile(filePath, text, "utf8");
+
+  return descriptor({
+    fileName: "proof.txt",
+    sizeBytes: Buffer.byteLength(text),
+    storageRef: { kind: "local_path", uri: filePath, sha256: null }
+  });
+}
 
 describe("Extraction Agent", () => {
-  it("selects different routes for different proof descriptors", () => {
-    const routes = proofToolFixtures.map((fixture) => selectInitialRoute(fixture.descriptor));
-    expect(new Set(routes).size).toBe(4);
+  it("selects different routes from proof descriptor inspection metadata", () => {
+    const routes = [
+      descriptor({ mimeType: "application/pdf", textLayer: true, tableLikely: false, imageQuality: "high" }),
+      descriptor({ mimeType: "application/pdf", textLayer: true, tableLikely: true, imageQuality: "high" }),
+      descriptor({ mimeType: "image/png", textLayer: false, tableLikely: false, imageQuality: "medium" }),
+      descriptor({ mimeType: "image/jpeg", textLayer: false, tableLikely: false, imageQuality: "low" })
+    ].map((item) => selectInitialRoute(item));
+
     expect(routes).toEqual(["parse_pdf_text", "parse_pdf_table", "parse_image_ocr", "manual_correction"]);
   });
 
@@ -23,8 +62,11 @@ describe("Extraction Agent", () => {
   });
 
   it("returns schema-valid raw extraction output with a visible timeline", async () => {
-    const fixture = proofToolFixtures.find((item) => item.expectedRoute === "parse_pdf_text")!;
-    const result = await runExtractionAgent(fixture.descriptor);
+    const result = await runExtractionAgent(
+      await textProofDescriptor(
+        "Wise transfer receipt. Paid USD 10.00 to ReconPilot Sdn Bhd. Reference INV-1001. Date 2026-05-20. Status: Paid. Payer: Acme Pte Ltd."
+      )
+    );
 
     expect(paymentProofExtractionOutputSchema.safeParse(result.extraction).success).toBe(true);
     expect(result.extraction.aiMetadata.extractionRoute).toBe("parse_pdf_text");
@@ -35,8 +77,9 @@ describe("Extraction Agent", () => {
   });
 
   it("keeps low-quality proof truthful and manual-reviewable", async () => {
-    const fixture = proofToolFixtures.find((item) => item.expectedRoute === "manual_correction")!;
-    const result = await runExtractionAgent(fixture.descriptor);
+    const result = await runExtractionAgent(
+      descriptor({ mimeType: "image/jpeg", textLayer: false, tableLikely: false, imageQuality: "low" })
+    );
 
     expect(result.extraction.aiMetadata.extractionRoute).toBe("manual_correction");
     expect(result.extraction.aiMetadata.requiresManualReview).toBe(true);
