@@ -30,7 +30,7 @@ export class ChutesClient {
     const provider =
       options.provider ??
       (readLocalEnvValue("LLM_PROVIDER") as "chutes" | "nvidia" | undefined) ??
-      (readLocalEnvValue("NVIDIA_API_KEY") && !readLocalEnvValue("CHUTES_API_KEY") ? "nvidia" : "chutes");
+      (readLocalEnvValue("CHUTES_API_KEY") && !readLocalEnvValue("NVIDIA_API_KEY") ? "chutes" : "nvidia");
 
     const apiKey =
       options.apiKey ??
@@ -38,8 +38,8 @@ export class ChutesClient {
     if (!apiKey) {
       throw new Error(
         provider === "nvidia"
-          ? "NVIDIA_API_KEY is required to run AI extraction with NVIDIA."
-          : "CHUTES_API_KEY is required to run AI extraction with Chutes."
+          ? "NVIDIA_API_KEY is required to run AI extraction with NVIDIA. Set LLM_PROVIDER=nvidia and NVIDIA_API_KEY in .env.local, then restart the dev server."
+          : "CHUTES_API_KEY is required to run AI extraction with Chutes. Set LLM_PROVIDER=chutes and CHUTES_API_KEY in .env.local, then restart the dev server."
       );
     }
 

@@ -54,7 +54,7 @@ export default function Home() {
   const [result, setResult] = useState<ApiResult | null>(null);
 
   const statusCopy = useMemo(() => {
-    if (status === "pending") return "Chutes is selecting tools";
+    if (status === "pending") return "AI provider is selecting tools";
     if (status === "readyDone") return "Extraction complete";
     if (status === "error") return "Extraction failed";
     return "Ready";
@@ -142,7 +142,7 @@ export default function Home() {
         <section className="run-bar">
           <div>
             <p className="eyebrow">Extraction Agent</p>
-            <h2>Chutes chooses the extraction route for every document</h2>
+            <h2>The AI extraction provider chooses the route for every document</h2>
           </div>
           <span className={`status-pill ${status === "error" ? "review" : status === "pending" ? "pending" : status === "readyDone" ? "ready" : "neutral"}`}>
             {statusCopy}
