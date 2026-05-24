@@ -18,11 +18,12 @@ Agent 2 must not:
 
 ## Contract Setup
 
-- [ ] Import or define the final `NormalizedInputBatch` handoff type.
-- [ ] Confirm `schemaVersion`, `batchId`, `expectedPayments`, `bankTransactions`, `paymentProofs`, `warnings`, and `timelines` exist.
-- [ ] Confirm money values are decimal strings.
-- [ ] Confirm bank rows expose normalized remittance/reference data.
-- [ ] Confirm payment proofs preserve Agent 1 confidence and evidence metadata.
+- [ ] Import the existing `NormalizedInputBatch` handoff type from `src/lib/recon/types.ts`.
+- [ ] Consume `response.codeTools.normalizedInputBatch` from the current extraction API shape.
+- [x] Confirm `schemaVersion`, `batchId`, `expectedPayments`, `bankTransactions`, `paymentProofs`, `warnings`, and `timelines` exist.
+- [x] Confirm money values are decimal strings.
+- [x] Confirm bank rows expose `normalizedReference`.
+- [x] Confirm payment proofs preserve Agent 1 confidence and evidence metadata.
 - [ ] Define `OrchestratorOutput`.
 - [ ] Define `ReconciliationResult`.
 - [ ] Define `ArtifactRequest`.

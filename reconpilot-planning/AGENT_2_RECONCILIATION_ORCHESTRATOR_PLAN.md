@@ -6,6 +6,35 @@ Component: Agent 2 + Reconciliation Tools
 Date: 2026-05-24
 
 Implementation checklist: [AGENT_2_RECONCILIATION_TODO.md](AGENT_2_RECONCILIATION_TODO.md)
+Opus coding handoff: [OPUS_AGENT_2_IMPLEMENTATION_HANDOFF.md](OPUS_AGENT_2_IMPLEMENTATION_HANDOFF.md)
+
+## 0. Current Integration Point
+
+The current app already returns Code Tools output from:
+
+```text
+POST /api/reconciliation/extractions
+```
+
+Agent 2 should consume:
+
+```ts
+response.codeTools.normalizedInputBatch
+```
+
+Do not make Agent 2 read uploaded files, run OCR, parse PDFs, parse spreadsheets, or normalize records again.
+
+Recommended first library entrypoint:
+
+```ts
+runReconciliationOrchestrator(batch: NormalizedInputBatch): OrchestratorOutput
+```
+
+Recommended implementation folder:
+
+```text
+src/lib/recon/reconciliation/
+```
 
 ## 1. Purpose
 
