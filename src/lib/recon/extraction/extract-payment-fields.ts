@@ -1,4 +1,4 @@
-import type { ExchangeRateInformation, MoneyAmount } from "../types.js";
+import type { ExchangeRateInformation, MoneyAmount } from "../types";
 
 const currencyPattern = "(MYR|USD|SGD|EUR)";
 const moneyRegex = new RegExp(`\\b${currencyPattern}\\s*([0-9]+(?:\\.[0-9]+)?)\\b`, "i");

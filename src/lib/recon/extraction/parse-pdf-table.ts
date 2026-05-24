@@ -1,7 +1,7 @@
-import { readProofSource } from "./read-proof-source.js";
-import { buildToolResult } from "./build-tool-result.js";
-import { extractPdfText } from "./pdf-text.js";
-import type { PaymentProofInputDescriptor } from "../types.js";
+import { readProofSource } from "./read-proof-source";
+import { buildToolResult } from "./build-tool-result";
+import { extractPdfText } from "./pdf-text";
+import type { PaymentProofInputDescriptor } from "../types";
 
 export async function parsePdfTable(descriptor: PaymentProofInputDescriptor) {
   const source = await readProofSource(descriptor);
@@ -11,7 +11,7 @@ export async function parsePdfTable(descriptor: PaymentProofInputDescriptor) {
     descriptor,
     route: "parse_pdf_table",
     text,
-    evidenceSource: source.mode === "fixture_fallback" ? "manual" : "pdf_table",
+    evidenceSource: source.mode === "unreadable" ? "manual" : "pdf_table",
     sourceMode: source.mode,
     sourceWarnings: source.warnings
   });

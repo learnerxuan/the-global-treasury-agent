@@ -2,7 +2,6 @@ import type { z } from "zod";
 import type {
   accountIdentifierSchema,
   bankStatementTransactionSchema,
-  demoFixtureSchema,
   exchangeRateInformationSchema,
   expectedPaymentRecordSchema,
   fieldEvidenceSchema,
@@ -19,7 +18,7 @@ import type {
   remittanceInformationSchema,
   warningCodeSchema,
   warningSchema
-} from "./schemas.js";
+} from "./schemas";
 
 export type CurrencyCode = z.infer<typeof mvpCurrencySchema>;
 export type WarningCode = z.infer<typeof warningCodeSchema>;
@@ -32,7 +31,6 @@ export type RawExtractedParty = z.infer<typeof rawExtractedPartySchema>;
 export type RawExtractedReference = z.infer<typeof rawExtractedReferenceSchema>;
 export type RemittanceInformation = z.infer<typeof remittanceInformationSchema>;
 export type ExchangeRateInformation = z.infer<typeof exchangeRateInformationSchema>;
-export type DemoFixture = z.infer<typeof demoFixtureSchema>;
 export type FileStorageRef = z.infer<typeof fileStorageRefSchema>;
 export type InputFileDescriptor = z.infer<typeof inputFileDescriptorSchema>;
 export type ExpectedPaymentRecord = z.infer<typeof expectedPaymentRecordSchema>;

@@ -7,7 +7,7 @@ import {
   extractMoney,
   extractPaymentStatus,
   tableToText
-} from "./extract-payment-fields.js";
+} from "./extract-payment-fields";
 
 describe("extract-payment-fields", () => {
   it("extracts decimal-string money", () => {

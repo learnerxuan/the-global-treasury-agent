@@ -1,7 +1,7 @@
-import { paymentProofExtractionOutputSchema } from "../schemas.js";
-import type { PaymentProofExtractionOutput, PaymentProofFinancialPayload, PaymentProofInputDescriptor, WarningCode } from "../types.js";
-import { addEvent, createTimeline, listEvents, type TimelineEvent } from "../timeline.js";
-import { getExtractionToolRegistry, type ExtractionRoute, type ExtractionToolResult } from "./tools.js";
+import { paymentProofExtractionOutputSchema } from "../schemas";
+import type { PaymentProofExtractionOutput, PaymentProofFinancialPayload, PaymentProofInputDescriptor, WarningCode } from "../types";
+import { addEvent, createTimeline, listEvents, type TimelineEvent } from "../timeline";
+import { getExtractionToolRegistry, type ExtractionRoute, type ExtractionToolResult } from "./tools";
 
 export type ExtractionAgentResult = {
   extraction: PaymentProofExtractionOutput;

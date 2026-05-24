@@ -1,21 +1,29 @@
 {
-  "name": "reconpilot-blocks-1-2",
+  "name": "reconpilot-input-extraction",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "test": "vitest run --globals",
-    "typecheck": "tsc --noEmit",
-    "demo:extraction": "tsx src/scripts/run-extraction-demo.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",
+    "next": "^16.2.6",
     "pdf-parse": "^2.4.5",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "read-excel-file": "^9.0.10",
     "tesseract.js": "^7.0.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vitest": "^3.1.0"

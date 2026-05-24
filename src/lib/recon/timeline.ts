@@ -1,5 +1,5 @@
-import type { ExtractionRoute } from "./extraction/tools.js";
-import type { Warning } from "./types.js";
+import type { ExtractionRoute } from "./extraction/tools";
+import type { Warning } from "./types";
 
 export type TimelineEvent = {
   id: string;

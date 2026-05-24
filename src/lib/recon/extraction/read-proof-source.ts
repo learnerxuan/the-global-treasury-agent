@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { PaymentProofInputDescriptor, Warning } from "../types.js";
-import { makeWarning } from "./evidence.js";
+import type { PaymentProofInputDescriptor, Warning } from "../types";
+import { makeWarning } from "./evidence";
 
 export type ProofSource = {
-  mode: "real_file" | "fixture_fallback";
+  mode: "real_file" | "unreadable";
   fileName: string;
   mimeType: PaymentProofInputDescriptor["mimeType"];
   localPath?: string;
@@ -36,7 +36,7 @@ export async function readProofSource(descriptor: PaymentProofInputDescriptor): 
     } catch (error) {
       const fallbackReason = error instanceof Error ? error.message : `Unable to read ${descriptor.storageRef.uri}`;
       return {
-        mode: "fixture_fallback",
+        mode: "unreadable",
         fileName: descriptor.fileName,
         mimeType: descriptor.mimeType,
         fallbackReason,
@@ -52,7 +52,7 @@ export async function readProofSource(descriptor: PaymentProofInputDescriptor): 
   }
 
   return {
-    mode: "fixture_fallback",
+    mode: "unreadable",
     fileName: descriptor.fileName,
     mimeType: descriptor.mimeType,
     fallbackReason: "No readable local storageRef was provided.",

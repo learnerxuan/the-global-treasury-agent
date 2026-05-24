@@ -1,4 +1,4 @@
-import type { FieldEvidence, Warning, WarningCode } from "../types.js";
+import type { FieldEvidence, Warning, WarningCode } from "../types";
 
 export function makeWarning(code: WarningCode, message: string, field: string | null): Warning {
   return { code, message, field };
