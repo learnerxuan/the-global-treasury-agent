@@ -25,8 +25,8 @@ INV-1001,Acme Pte Ltd,not-a-number,USD`;
 const INVALID_DATE_CSV = `invoice_number,customer,issue_date,amount,currency
 INV-1001,Acme Pte Ltd,19/05/2026,10.00,USD`;
 
-const UNSUPPORTED_CURRENCY_CSV = `invoice_number,customer,amount,currency
-INV-1001,Acme Pte Ltd,10.00,GBP`;
+const NON_ISO_CURRENCY_CSV = `invoice_number,customer,amount,currency
+INV-1001,Acme Pte Ltd,10.00,USDD`;
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -151,9 +151,15 @@ describe("parseExpectedPayments — invalid date", () => {
   });
 });
 
-describe("parseExpectedPayments — unsupported currency", () => {
-  it("emits INVALID_CURRENCY and defaults to USD", () => {
-    const { records } = parseExpectedPayments(UNSUPPORTED_CURRENCY_CSV, "csv", "file_008");
+describe("parseExpectedPayments — currency validation", () => {
+  it("accepts any 3-letter ISO-style currency code", () => {
+    const { records } = parseExpectedPayments("invoice_number,customer,amount,currency\nINV-1001,Acme Pte Ltd,10.00,JPY", "csv", "file_008");
+    expect(records[0]!.warnings.some((w) => w.code === "INVALID_CURRENCY")).toBe(false);
+    expect(records[0]!.amountDue.currency).toBe("JPY");
+  });
+
+  it("emits INVALID_CURRENCY and defaults to USD for non-ISO currency codes", () => {
+    const { records } = parseExpectedPayments(NON_ISO_CURRENCY_CSV, "csv", "file_008");
     expect(records[0]!.warnings.some((w) => w.code === "INVALID_CURRENCY")).toBe(true);
     expect(records[0]!.amountDue.currency).toBe("USD");
   });

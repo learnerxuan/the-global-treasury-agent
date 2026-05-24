@@ -1,6 +1,6 @@
 import type { ExchangeRateInformation, MoneyAmount } from "../types";
 
-const currencyPattern = "(MYR|USD|SGD|EUR)";
+const currencyPattern = "([A-Z]{3})";
 const moneyRegex = new RegExp(`\\b${currencyPattern}\\s*([0-9]+(?:\\.[0-9]+)?)\\b`, "i");
 const allMoneyRegex = new RegExp(`\\b${currencyPattern}\\s*([0-9]+(?:\\.[0-9]+)?)\\b`, "gi");
 

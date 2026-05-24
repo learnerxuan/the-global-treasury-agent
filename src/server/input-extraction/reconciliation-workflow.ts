@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { extname, isAbsolute, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { readSheet } from "read-excel-file/node";
 import { extractImageText } from "../../lib/recon/extraction/image-ocr";
-import { extractPdfText } from "../../lib/recon/extraction/pdf-text";
+import { extractPdfOcrText, extractPdfText } from "../../lib/recon/extraction/pdf-text";
 import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocumentExtraction, type StructuredExtractor } from "../../lib/recon/extraction/structured-extractor";
 import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
 import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
+import { parseBankStatements, parseBankStatementText } from "../../lib/recon/parsers/bank-statements";
 import type {
   BankStatementTransaction,
   CurrencyCode,
@@ -23,6 +24,7 @@ import type {
 
 const maxUploadBytes = 10 * 1024 * 1024;
 const defaultStorageDir = join(/* turbopackIgnore: true */ process.cwd(), "runtime", "uploads");
+const defaultExtractedDir = join(/* turbopackIgnore: true */ process.cwd(), "runtime", "extracted");
 
 const supportedMimeTypes = new Set([
   "application/pdf",
@@ -31,7 +33,6 @@ const supportedMimeTypes = new Set([
   "image/webp",
   "image/tiff",
   "text/plain",
-  "text/markdown",
   "text/csv",
   "application/csv",
   "application/vnd.ms-excel",
@@ -78,12 +79,72 @@ export type ReconciliationExtractionResponse = {
 
 export type ReconciliationExtractionOptions = {
   storageDir?: string;
+  extractedDir?: string;
   extractor?: StructuredExtractor;
+};
+
+export type LocalExtractionStorage = {
+  ingestionDir: string;
+  documentsPath: string;
+  extractionsPath: string;
+  parsedInputBatchPath: string;
+  normalizedInputBatchPath: string;
+  jobsPath: string;
+  summaryPath: string;
+  rawTextDir: string;
+  waitingRecordPaths: string[];
+};
+
+export type MockReconciliationRun = {
+  runId: string;
+  status: "queued_mock";
+  trigger: "payment_proof_uploaded";
+  createdAt: string;
+  paymentProofRecordPaths: string[];
+  message: string;
+  nextStep: string;
+  path: string;
+};
+
+export type RoleExtractionResponse = {
+  ingestionId: string;
+  role: DocumentRole;
+  uploadedAt: string;
+  documents: StoredDocument[];
+  extractions: StructuredDocumentExtraction[];
+  codeTools: {
+    parsedInputBatch: InputBatch;
+    normalizedInputBatch: NormalizedInputBatch;
+  };
+  storage: LocalExtractionStorage;
+  mockReconciliationRun: MockReconciliationRun | null;
 };
 
 function resolveStorageDir(storageDir?: string): string {
   if (!storageDir) return defaultStorageDir;
   return isAbsolute(storageDir) ? storageDir : resolve(/* turbopackIgnore: true */ process.cwd(), storageDir);
+}
+
+function resolveExtractedDir(extractedDir?: string): string {
+  if (!extractedDir) return defaultExtractedDir;
+  return isAbsolute(extractedDir) ? extractedDir : resolve(/* turbopackIgnore: true */ process.cwd(), extractedDir);
+}
+
+function toProjectRelativePath(path: string): string {
+  if (!isAbsolute(path)) return path.replace(/\\/g, "/");
+  const relativePath = relative(/* turbopackIgnore: true */ process.cwd(), path);
+  return relativePath.startsWith("..") ? path.replace(/\\/g, "/") : relativePath.replace(/\\/g, "/");
+}
+
+function toPublicJson<T>(value: T): T {
+  if (typeof value === "string") return toProjectRelativePath(value) as T;
+  if (Array.isArray(value)) return value.map((item) => toPublicJson(item)) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, toPublicJson(item)])
+    ) as T;
+  }
+  return value;
 }
 
 function sanitizeFileName(fileName: string): string {
@@ -100,7 +161,7 @@ function decodeContent(contentBase64: string): Buffer {
 
 function assertSupportedMimeType(mimeType: string): void {
   if (!supportedMimeTypes.has(mimeType)) {
-    throw new Error(`Unsupported document type: ${mimeType}. Supported types: PDF, image, XLSX, CSV, Markdown, and TXT.`);
+    throw new Error(`Unsupported document type: ${mimeType}. Supported types: PDF, image, XLSX, CSV, and TXT.`);
   }
 }
 
@@ -113,7 +174,6 @@ function ensureExtension(fileName: string, mimeType: string): string {
     "image/webp": ".webp",
     "image/tiff": ".tiff",
     "text/plain": ".txt",
-    "text/markdown": ".md",
     "text/csv": ".csv",
     "application/csv": ".csv",
     "application/vnd.ms-excel": ".csv",
@@ -159,12 +219,53 @@ async function readableTextFromStoredFile(path: string, mimeType: string, bytes:
   if (mimeType === "application/pdf") {
     try {
       const text = await extractPdfText(bytes);
+      if (text.trim().length < 40) {
+        try {
+          const ocrText = await extractPdfOcrText(bytes);
+          if (ocrText.trim().length > 0) {
+            return {
+              text: ocrText,
+              warnings: ["PDF text layer was empty or too short; OCR fallback was used."],
+              observations: ["Scanned PDF likely", "PDF page screenshots were OCR processed", "OCR text is available"]
+            };
+          }
+        } catch (ocrError) {
+          return {
+            text,
+            warnings: [
+              "PDF text layer was empty or too short.",
+              `Could not OCR PDF pages: ${ocrError instanceof Error ? ocrError.message : "unknown error"}`
+            ],
+            observations: ["Scanned PDF likely", "PDF OCR failed"]
+          };
+        }
+      }
       return {
         text,
         warnings: [],
         observations: [looksTableLike(text) ? "PDF text appears table-like" : "PDF text layer is readable"]
       };
     } catch (error) {
+      try {
+        const ocrText = await extractPdfOcrText(bytes);
+        if (ocrText.trim().length > 0) {
+          return {
+            text: ocrText,
+            warnings: [`Could not read PDF text layer: ${error instanceof Error ? error.message : "unknown error"}; OCR fallback was used.`],
+            observations: ["PDF text extraction failed", "PDF page screenshots were OCR processed", "OCR text is available"]
+          };
+        }
+      } catch (ocrError) {
+        return {
+          text: "",
+          warnings: [
+            `Could not read PDF text: ${error instanceof Error ? error.message : "unknown error"}`,
+            `Could not OCR PDF pages: ${ocrError instanceof Error ? ocrError.message : "unknown error"}`
+          ],
+          observations: ["PDF text extraction failed", "PDF OCR failed"]
+        };
+      }
+
       return {
         text: "",
         warnings: [`Could not read PDF text: ${error instanceof Error ? error.message : "unknown error"}`],
@@ -215,7 +316,9 @@ async function readableTextFromStoredFile(path: string, mimeType: string, bytes:
   };
 }
 
-async function storeDocument(role: DocumentRole, upload: UploadedDocument, storageDir: string): Promise<{ stored: StoredDocument; text: string }> {
+type StoredDocumentContent = { stored: StoredDocument; text: string; bytes: Buffer };
+
+async function storeDocument(role: DocumentRole, upload: UploadedDocument, storageDir: string): Promise<StoredDocumentContent> {
   assertSupportedMimeType(upload.mimeType);
   const bytes = decodeContent(upload.contentBase64);
   const fileName = ensureExtension(sanitizeFileName(upload.fileName), upload.mimeType);
@@ -228,6 +331,7 @@ async function storeDocument(role: DocumentRole, upload: UploadedDocument, stora
   const readable = await readableTextFromStoredFile(storagePath, upload.mimeType, bytes);
   return {
     text: readable.text,
+    bytes,
     stored: {
       documentId: `${role}_${randomUUID()}`,
       role,
@@ -242,11 +346,9 @@ async function storeDocument(role: DocumentRole, upload: UploadedDocument, stora
   };
 }
 
-const mvpCurrencies = new Set<CurrencyCode>(["MYR", "USD", "SGD", "EUR"]);
-
 function toCurrency(value: string | null | undefined, fallback: CurrencyCode): CurrencyCode {
   const normalized = value?.trim().toUpperCase();
-  return normalized && mvpCurrencies.has(normalized as CurrencyCode) ? (normalized as CurrencyCode) : fallback;
+  return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : fallback;
 }
 
 function toMoneyAmount(value: string | null | undefined, currency: string | null | undefined, fallbackCurrency: CurrencyCode): MoneyAmount | null {
@@ -255,6 +357,13 @@ function toMoneyAmount(value: string | null | undefined, currency: string | null
   const normalizedValue = normalize_currency_amount(value);
   if (!normalizedValue) return null;
   return { value: normalizedValue, currency: normalizedCurrency };
+}
+
+function extractedMoneyToAmount(
+  amount: { value: string | null; currency: string | null } | null | undefined,
+  fallbackCurrency: CurrencyCode
+): MoneyAmount | null {
+  return toMoneyAmount(amount?.value, amount?.currency, fallbackCurrency);
 }
 
 function toWarning(message: string, field: string | null): Warning {
@@ -365,13 +474,21 @@ function buildExpectedPayments(extraction: StructuredDocumentExtraction, stored:
 
 function buildBankTransactions(extraction: StructuredDocumentExtraction, stored: StoredDocument): BankStatementTransaction[] {
   return extraction.bankTransactions.map((transaction, index) => {
-    const rawValue = transaction.amount.value ?? "0.00";
+    const netCreditAmount = extractedMoneyToAmount(transaction.netCreditAmount, "MYR");
+    const amountReceived = extractedMoneyToAmount(transaction.amountReceived, "MYR");
+    const sourceAmount = extractedMoneyToAmount(transaction.sourceAmount, "USD");
+    const bankFeeDeducted = extractedMoneyToAmount(transaction.bankFeeDeducted, "MYR");
+    const feeCurrency = bankFeeDeducted?.currency ?? (transaction.feeCurrency ? toCurrency(transaction.feeCurrency, "MYR") : null);
+    const primaryAmount = netCreditAmount ?? amountReceived ?? extractedMoneyToAmount(transaction.amount, "MYR");
+    const rawValue = primaryAmount?.value ?? transaction.amount.value ?? "0.00";
     const isDebit = rawValue.trim().startsWith("-");
+    const creditDebitIndicator = transaction.creditDebitIndicator ?? (isDebit ? "DBIT" : "CRDT");
     const absoluteValue = isDebit ? rawValue.trim().slice(1) : rawValue;
-    const amount = toMoneyAmount(absoluteValue, transaction.amount.currency, "MYR") ?? { value: "0.00", currency: "MYR" };
-    const reference = transaction.reference ?? transaction.description;
-    const invoiceNumber = normalize_reference(reference) ? transaction.reference : null;
+    const amount = toMoneyAmount(absoluteValue, primaryAmount?.currency ?? transaction.amount.currency, "MYR") ?? { value: "0.00", currency: "MYR" };
+    const reference = transaction.referenceNo ?? transaction.reference ?? transaction.ttNo ?? transaction.description;
+    const invoiceNumber = normalize_reference(reference) ? reference : null;
     const bookingDate = normalize_date(transaction.transactionDate) ?? new Date().toISOString().slice(0, 10);
+    const remarks = transaction.remarks ?? transaction.description;
 
     return {
       schemaVersion: "1.0.0",
@@ -379,12 +496,20 @@ function buildBankTransactions(extraction: StructuredDocumentExtraction, stored:
       accountId: "MYR_MAIN_ACCOUNT",
       bookingDate,
       valueDate: normalize_date(transaction.valueDate),
-      creditDebitIndicator: isDebit ? "DBIT" : "CRDT",
+      creditDebitIndicator,
       amount,
-      acctSvcrRef: transaction.reference,
+      amountReceived: creditDebitIndicator === "CRDT" ? amountReceived : null,
+      sourceAmount,
+      exchangeRateApplied: transaction.exchangeRateApplied ?? null,
+      bankFeeDeducted,
+      feeCurrency,
+      netCreditAmount: creditDebitIndicator === "CRDT" ? netCreditAmount : null,
+      acctSvcrRef: transaction.referenceNo ?? transaction.reference ?? transaction.ttNo ?? null,
+      referenceNo: transaction.referenceNo ?? transaction.reference ?? null,
+      ttNo: transaction.ttNo ?? null,
       normalizedReference: normalize_reference(reference),
       endToEndId: null,
-      txId: null,
+      txId: transaction.ttNo ?? null,
       debtorName: transaction.payerName,
       debtorNormalizedName: normalize_party_name(transaction.payerName),
       debtorAccount: null,
@@ -392,15 +517,16 @@ function buildBankTransactions(extraction: StructuredDocumentExtraction, stored:
       creditorNormalizedName: null,
       creditorAccount: null,
       remittanceInformation: {
-        raw: transaction.description ?? transaction.reference,
+        raw: remarks ?? transaction.reference ?? transaction.referenceNo ?? transaction.ttNo ?? null,
         structured: {
           invoiceNumber,
-          creditorReference: transaction.reference,
-          additionalInfo: transaction.description
+          creditorReference: transaction.referenceNo ?? transaction.reference ?? transaction.ttNo ?? null,
+          additionalInfo: remarks
         }
       },
       description: transaction.description,
       rawDescription: transaction.description,
+      remarks,
       sourceFileId: stored.documentId,
       sourceRowNumber: index + 1,
       warnings: extraction.warnings.map((warning) => toWarning(warning, null))
@@ -438,6 +564,10 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
   const source = sourceFromTool(extraction.selectedTool);
   return extraction.paymentProofs.map((proof, index) => {
     const paidAmount = toMoneyAmount(proof.paidAmount.value, proof.paidAmount.currency, "MYR");
+    const grossAmount = extractedMoneyToAmount(proof.grossAmount, paidAmount?.currency ?? "USD");
+    const feeAmount = extractedMoneyToAmount(proof.feeAmount, paidAmount?.currency ?? "USD");
+    const netAmount = extractedMoneyToAmount(proof.netAmount, paidAmount?.currency ?? "USD");
+    const feeCurrency = feeAmount?.currency ?? (proof.feeCurrency ? toCurrency(proof.feeCurrency, paidAmount?.currency ?? "USD") : null);
     const paymentStatus = mapPaymentStatus(proof.paymentStatus);
     const reference = proof.reference;
     const fieldConfidence: Record<string, number> = {
@@ -478,9 +608,10 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
         invoiceIds: reference ? [reference] : [],
         endToEndId: null,
         uetr: null,
-        feeAmount: null,
-        netAmount: null,
-        sourceAmount: null,
+        feeAmount,
+        feeCurrency,
+        netAmount,
+        sourceAmount: netAmount ?? grossAmount ?? paidAmount,
         targetAmount: null,
         exchangeRateInformation: parseExchangeRate(proof.exchangeRate),
         remittanceInformation: {
@@ -543,35 +674,338 @@ function buildParsedInputBatch(input: {
   };
 }
 
-async function storeDocuments(role: DocumentRole, uploads: UploadedDocument[], storageDir: string): Promise<Array<{ stored: StoredDocument; text: string }>> {
+async function storeDocuments(role: DocumentRole, uploads: UploadedDocument[], storageDir: string): Promise<StoredDocumentContent[]> {
   if (uploads.length === 0) {
     throw new Error(`Upload at least one ${role.replace("_", " ")} document.`);
   }
 
-  const storedDocuments: Array<{ stored: StoredDocument; text: string }> = [];
+  const storedDocuments: StoredDocumentContent[] = [];
   for (const upload of uploads) {
     storedDocuments.push(await storeDocument(role, upload, storageDir));
   }
   return storedDocuments;
 }
 
+function bankStatementFormatForDocument(document: StoredDocument): "csv" | "xlsx" | "text" | null {
+  if (isCsvLike(document.mimeType, document.fileName)) return "csv";
+  if (isSpreadsheetLike(document.mimeType, document.fileName)) return "xlsx";
+  if (document.mimeType === "application/pdf" || document.mimeType === "text/plain") return "text";
+  return null;
+}
+
+function hasUsableBankParserRecords(records: BankStatementTransaction[]): boolean {
+  return records.some(
+    (record) =>
+      record.amount.value !== "0.00" &&
+      Boolean(record.bookingDate) &&
+      Boolean(record.description ?? record.rawDescription ?? record.acctSvcrRef)
+  );
+}
+
+function bankParserExtraction(document: StoredDocumentContent): StructuredDocumentExtraction | null {
+  if (document.stored.role !== "bank_statement") return null;
+
+  const format = bankStatementFormatForDocument(document.stored);
+  if (!format) return null;
+
+  const parsed = format === "text"
+    ? parseBankStatementText(document.text, document.stored.documentId, "MYR_MAIN_ACCOUNT")
+    : parseBankStatements(
+        format === "xlsx" ? document.bytes : document.text,
+        format,
+        document.stored.documentId,
+        "MYR_MAIN_ACCOUNT"
+      );
+
+  if (!hasUsableBankParserRecords(parsed.records)) return null;
+
+  const warnings = [
+    ...parsed.warnings.map((warning) => warning.message),
+    ...parsed.records.flatMap((record) => record.warnings.map((warning) => warning.message))
+  ];
+
+  return {
+    role: "bank_statement",
+    selectedTool: format === "xlsx" ? "parse_spreadsheet" : format === "csv" ? "parse_csv_text" : "parse_pdf_text",
+    confidence: 0.98,
+    summary: `Code parser extracted ${parsed.records.length} bank transaction(s); LLM call skipped.`,
+    invoices: [],
+    bankTransactions: parsed.records.map((record) => ({
+      transactionDate: record.bookingDate,
+      valueDate: record.valueDate,
+      description: record.description,
+      payerName: record.debtorName,
+      amount: record.amount,
+      creditDebitIndicator: record.creditDebitIndicator,
+      amountReceived: record.amountReceived ?? null,
+      sourceAmount: record.sourceAmount ?? null,
+      exchangeRateApplied: record.exchangeRateApplied ?? null,
+      bankFeeDeducted: record.bankFeeDeducted ?? null,
+      feeCurrency: record.feeCurrency ?? null,
+      netCreditAmount: record.netCreditAmount ?? null,
+      reference: record.acctSvcrRef ?? record.normalizedReference ?? null,
+      referenceNo: record.referenceNo ?? record.acctSvcrRef ?? null,
+      ttNo: record.ttNo ?? record.txId ?? null,
+      remarks: record.remarks ?? record.remittanceInformation.raw ?? null
+    })),
+    paymentProofs: [],
+    warnings
+  };
+}
+
+function hasBankCoreFields(transaction: StructuredDocumentExtraction["bankTransactions"][number]): boolean {
+  return Boolean(
+    transaction.transactionDate &&
+    transaction.amount.value &&
+    (transaction.description || transaction.reference || transaction.referenceNo || transaction.ttNo)
+  );
+}
+
+function calibrateExtractionConfidence(extraction: StructuredDocumentExtraction): StructuredDocumentExtraction {
+  if (extraction.role !== "bank_statement" || extraction.selectedTool === "manual_correction") {
+    return extraction;
+  }
+
+  const hasCoreBankFields = extraction.bankTransactions.some(hasBankCoreFields);
+  if (!hasCoreBankFields || extraction.confidence >= 0.9) return extraction;
+
+  return {
+    ...extraction,
+    confidence: 0.9,
+    summary: `${extraction.summary} Core bank statement fields are present, so missing FX/source/fee fields were treated as optional.`
+  };
+}
+
 async function extractStoredDocuments(
   extractor: StructuredExtractor,
-  documents: Array<{ stored: StoredDocument; text: string }>
+  documents: StoredDocumentContent[]
 ): Promise<StructuredDocumentExtraction[]> {
   const extractions: StructuredDocumentExtraction[] = [];
   for (const document of documents) {
-    extractions.push(
-      await extractor({
+    try {
+      const codeExtraction = bankParserExtraction(document);
+      if (codeExtraction) {
+        extractions.push(codeExtraction);
+        continue;
+      }
+
+      const extraction = await extractor({
         role: document.stored.role,
         fileName: document.stored.fileName,
         mimeType: document.stored.mimeType,
         text: document.text,
         toolObservations: [...document.stored.toolObservations, ...document.stored.warnings]
-      })
-    );
+      });
+      extractions.push(calibrateExtractionConfidence(extraction));
+    } catch (error) {
+      extractions.push({
+        role: document.stored.role,
+        selectedTool: "manual_correction",
+        confidence: 0,
+        summary: `Extraction failed for ${document.stored.fileName}.`,
+        invoices: [],
+        bankTransactions: [],
+        paymentProofs: [],
+        warnings: [`Extraction failed: ${error instanceof Error ? error.message : "unknown error"}`]
+      });
+    }
   }
   return extractions;
+}
+
+function emptyStoredDocuments(): Record<DocumentRole, StoredDocument[]> {
+  return { invoice: [], bank_statement: [], payment_proof: [] };
+}
+
+function emptyExtractions(): Record<DocumentRole, StructuredDocumentExtraction[]> {
+  return { invoice: [], bank_statement: [], payment_proof: [] };
+}
+
+function documentsForRole(role: DocumentRole, documents: StoredDocument[]): Record<DocumentRole, StoredDocument[]> {
+  return { ...emptyStoredDocuments(), [role]: documents };
+}
+
+function extractionsForRole(role: DocumentRole, extractions: StructuredDocumentExtraction[]): Record<DocumentRole, StructuredDocumentExtraction[]> {
+  return { ...emptyExtractions(), [role]: extractions };
+}
+
+function extractedRoleFolder(role: DocumentRole): string {
+  if (role === "invoice") return "invoices";
+  if (role === "bank_statement") return "bank_transactions";
+  return "payment_proofs";
+}
+
+function waitingRecordsForRole(role: DocumentRole, normalizedInputBatch: NormalizedInputBatch): Array<{ recordId: string; record: unknown }> {
+  if (role === "invoice") {
+    return normalizedInputBatch.expectedPayments.map((record) => ({ recordId: record.expectedPaymentId, record }));
+  }
+
+  if (role === "bank_statement") {
+    return normalizedInputBatch.bankTransactions.map((record) => ({ recordId: record.internalTxId, record }));
+  }
+
+  return normalizedInputBatch.paymentProofs.map((record) => ({ recordId: record.proofId, record }));
+}
+
+function safeJsonFileName(value: string): string {
+  return `${value.replace(/[^a-zA-Z0-9._-]/g, "-")}.json`;
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function persistRoleExtraction(input: {
+  extractedDir: string;
+  ingestionId: string;
+  role: DocumentRole;
+  uploadedAt: string;
+  storedDocuments: StoredDocumentContent[];
+  extractions: StructuredDocumentExtraction[];
+  parsedInputBatch: InputBatch;
+  normalizedInputBatch: NormalizedInputBatch;
+}): Promise<LocalExtractionStorage> {
+  const roleFolder = extractedRoleFolder(input.role);
+  const ingestionDir = join(input.extractedDir, "ingestions", input.ingestionId);
+  const rawTextDir = join(ingestionDir, "raw_text");
+  const documentsPath = join(ingestionDir, "documents.json");
+  const extractionsPath = join(ingestionDir, "extractions.json");
+  const parsedInputBatchPath = join(ingestionDir, "parsed_input_batch.json");
+  const normalizedInputBatchPath = join(ingestionDir, "normalized_input_batch.json");
+  const jobsPath = join(ingestionDir, "jobs.json");
+  const summaryPath = join(ingestionDir, "summary.json");
+  const waitingDir = join(input.extractedDir, "waiting", roleFolder);
+
+  await mkdir(rawTextDir, { recursive: true });
+  await mkdir(waitingDir, { recursive: true });
+
+  await Promise.all(
+    input.storedDocuments.map((document) =>
+      writeFile(join(rawTextDir, `${document.stored.documentId}.txt`), document.text, "utf8")
+    )
+  );
+
+  const documents = input.storedDocuments.map((document) => toPublicJson(document.stored));
+  const jobs = documents.map((document, index) => ({
+    jobId: `job_${document.documentId}`,
+    ingestionId: input.ingestionId,
+    documentId: document.documentId,
+    role: input.role,
+    status: "completed",
+    selectedTool: input.extractions[index]?.selectedTool ?? null,
+    confidence: input.extractions[index]?.confidence ?? null,
+    uploadedAt: input.uploadedAt,
+    completedAt: new Date().toISOString(),
+    error: null
+  }));
+
+  const waitingRecordPaths: string[] = [];
+  for (const { recordId, record } of waitingRecordsForRole(input.role, input.normalizedInputBatch)) {
+    const recordPath = join(waitingDir, safeJsonFileName(recordId));
+    waitingRecordPaths.push(toProjectRelativePath(recordPath));
+    await writeJson(recordPath, {
+      stage: "waiting",
+      role: input.role,
+      ingestionId: input.ingestionId,
+      storedAt: new Date().toISOString(),
+      record
+    });
+  }
+
+  await writeJson(documentsPath, documents);
+  await writeJson(extractionsPath, input.extractions);
+  await writeJson(parsedInputBatchPath, input.parsedInputBatch);
+  await writeJson(normalizedInputBatchPath, input.normalizedInputBatch);
+  await writeJson(jobsPath, jobs);
+  await writeJson(summaryPath, {
+    ingestionId: input.ingestionId,
+    role: input.role,
+    uploadedAt: input.uploadedAt,
+    documentCount: documents.length,
+    extractionCount: input.extractions.length,
+    waitingRecordCount: waitingRecordPaths.length,
+    waitingDir: toProjectRelativePath(waitingDir)
+  });
+
+  return {
+    ingestionDir: toProjectRelativePath(ingestionDir),
+    documentsPath: toProjectRelativePath(documentsPath),
+    extractionsPath: toProjectRelativePath(extractionsPath),
+    parsedInputBatchPath: toProjectRelativePath(parsedInputBatchPath),
+    normalizedInputBatchPath: toProjectRelativePath(normalizedInputBatchPath),
+    jobsPath: toProjectRelativePath(jobsPath),
+    summaryPath: toProjectRelativePath(summaryPath),
+    rawTextDir: toProjectRelativePath(rawTextDir),
+    waitingRecordPaths
+  };
+}
+
+async function createMockReconciliationRun(input: {
+  extractedDir: string;
+  ingestionId: string;
+  waitingRecordPaths: string[];
+}): Promise<MockReconciliationRun> {
+  const runId = `mock_recon_${randomUUID()}`;
+  const path = join(input.extractedDir, "reconciliation_runs", "mock", `${runId}.json`);
+  const run: MockReconciliationRun = {
+    runId,
+    status: "queued_mock",
+    trigger: "payment_proof_uploaded",
+    createdAt: new Date().toISOString(),
+    paymentProofRecordPaths: input.waitingRecordPaths.map(toProjectRelativePath),
+    message: "Payment proof extraction was stored. Reconciliation would now search waiting invoices and bank transactions.",
+    nextStep: "Implement real matching to classify AUTO_MATCHED, LIKELY_MATCHED, NEEDS_REVIEW, or UNMATCHED.",
+    path: toProjectRelativePath(path)
+  };
+
+  await writeJson(path, run);
+  return run;
+}
+
+export async function extractRoleDocuments(
+  role: DocumentRole,
+  uploads: UploadedDocument[],
+  options: ReconciliationExtractionOptions = {}
+): Promise<RoleExtractionResponse> {
+  const storageDir = resolveStorageDir(options.storageDir);
+  const extractedDir = resolveExtractedDir(options.extractedDir);
+  const extractor = options.extractor ?? createChutesStructuredExtractor();
+  const storedDocuments = await storeDocuments(role, uploads, storageDir);
+  const extractions = await extractStoredDocuments(extractor, storedDocuments);
+  const uploadedAt = new Date().toISOString();
+  const ingestionId = `ing_${role}_${randomUUID()}`;
+  const documents = documentsForRole(role, storedDocuments.map((document) => document.stored));
+  const extractionRecord = extractionsForRole(role, extractions);
+  const parsedInputBatch = buildParsedInputBatch({ batchId: ingestionId, uploadedAt, documents, extractions: extractionRecord });
+  const normalizedInputBatch = normalizeInputBatch(parsedInputBatch);
+  const storage = await persistRoleExtraction({
+    extractedDir,
+    ingestionId,
+    role,
+    uploadedAt,
+    storedDocuments,
+    extractions,
+    parsedInputBatch,
+    normalizedInputBatch
+  });
+  const mockReconciliationRun = role === "payment_proof"
+    ? await createMockReconciliationRun({ extractedDir, ingestionId, waitingRecordPaths: storage.waitingRecordPaths })
+    : null;
+
+  return {
+    ingestionId,
+    role,
+    uploadedAt,
+    documents: toPublicJson(documents[role]),
+    extractions,
+    codeTools: {
+      parsedInputBatch: toPublicJson(parsedInputBatch),
+      normalizedInputBatch: toPublicJson(normalizedInputBatch)
+    },
+    storage,
+    mockReconciliationRun
+  };
 }
 
 export async function extractReconciliationDocuments(
@@ -606,11 +1040,11 @@ export async function extractReconciliationDocuments(
   return {
     batchId,
     uploadedAt,
-    documents,
+    documents: toPublicJson(documents),
     extractions,
     codeTools: {
-      parsedInputBatch,
-      normalizedInputBatch: normalizeInputBatch(parsedInputBatch)
+      parsedInputBatch: toPublicJson(parsedInputBatch),
+      normalizedInputBatch: toPublicJson(normalizeInputBatch(parsedInputBatch))
     }
   };
 }

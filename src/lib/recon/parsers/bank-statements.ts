@@ -86,8 +86,12 @@ function mapColumns(headers: string[]): { columnMap: ColumnMap; warnings: Warnin
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const MVP_CURRENCIES = new Set(["MYR", "USD", "SGD", "EUR"]);
-type MvpCurrency = "MYR" | "USD" | "SGD" | "EUR";
+type IsoCurrency = string;
+type ParsedMoney = { value: string; currency: IsoCurrency };
+
+function isIsoCurrencyCode(value: string | null | undefined): value is IsoCurrency {
+  return Boolean(value && /^[A-Z]{3}$/.test(value));
+}
 
 function mapDirection(raw: string): "CRDT" | "DBIT" | null {
   switch (raw.trim().toUpperCase()) {
@@ -98,9 +102,9 @@ function mapDirection(raw: string): "CRDT" | "DBIT" | null {
 }
 
 // Extracts the date part from an ISO date string embedded in the amount (e.g. "MYR 42.50")
-function extractEmbeddedCurrency(raw: string): MvpCurrency | null {
+function extractEmbeddedCurrency(raw: string): IsoCurrency | null {
   const m = raw.trim().match(/^([A-Z]{3})\s+/);
-  return m && MVP_CURRENCIES.has(m[1]!) ? (m[1]! as MvpCurrency) : null;
+  return isIsoCurrencyCode(m?.[1]) ? m[1]! : null;
 }
 
 // Strips a leading minus sign and normalises; returns null for unparseable values
@@ -117,8 +121,158 @@ function extractInvoiceNumber(text: string): string | null {
   return m ? m[0].toUpperCase() : null;
 }
 
+const MONEY_PATTERN = /\b([A-Z]{3}|RM)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\b/gi;
+const TT_PATTERN = /\b(?:TT|SWIFT|UETR)[A-Z0-9-]{4,}\b/i;
+
+function toIsoCurrency(raw: string | undefined): IsoCurrency | null {
+  if (!raw) return null;
+  const normalized = raw.toUpperCase() === "RM" ? "MYR" : raw.toUpperCase();
+  return isIsoCurrencyCode(normalized) ? normalized : null;
+}
+
+function parseMoneyValue(raw: string | undefined): string | null {
+  return normalize_currency_amount(raw?.replace(/,/g, "") ?? null);
+}
+
+function moneyFromMatch(currency: string | undefined, value: string | undefined): ParsedMoney | null {
+  const parsedCurrency = toIsoCurrency(currency);
+  const parsedValue = parseMoneyValue(value);
+  return parsedCurrency && parsedValue ? { value: parsedValue, currency: parsedCurrency } : null;
+}
+
+function extractFirstMoney(text: string, predicate: (currency: IsoCurrency) => boolean): ParsedMoney | null {
+  for (const match of text.matchAll(MONEY_PATTERN)) {
+    const money = moneyFromMatch(match[1], match[2]);
+    if (money && predicate(money.currency)) return money;
+  }
+  return null;
+}
+
+function extractSourceAmount(text: string, statementCurrency: IsoCurrency): ParsedMoney | null {
+  return extractFirstMoney(text, (currency) => currency !== statementCurrency);
+}
+
+function extractFxRate(text: string): string | null {
+  const match =
+    text.match(/\b(?:FX|FOREX|EXCHANGE\s+RATE|RATE)\s*[:=@-]?\s*([0-9]+(?:\.[0-9]+)?)/i) ??
+    text.match(/@\s*([0-9]+(?:\.[0-9]+)?)/);
+  return match?.[1] ?? null;
+}
+
+function extractBankFee(text: string): ParsedMoney | null {
+  const explicitFee =
+    text.match(/\b(?:LESS|DEDUCT(?:ED)?|FEE|FEES|CHARGE|CHARGES|COMMISSION)\b[^A-Z0-9]*([A-Z]{3}|RM)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i) ??
+    text.match(/\b([A-Z]{3}|RM)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:FEE|FEES|CHARGE|CHARGES|COMMISSION)\b/i);
+  return explicitFee ? moneyFromMatch(explicitFee[1], explicitFee[2]) : null;
+}
+
+function extractTransferReference(text: string): string | null {
+  const match = text.match(TT_PATTERN);
+  return match ? match[0].toUpperCase() : null;
+}
+
+function deriveAmountReceived(
+  sourceAmount: ParsedMoney | null,
+  exchangeRateApplied: string | null,
+  statementCurrency: IsoCurrency,
+): ParsedMoney | null {
+  if (!sourceAmount || !exchangeRateApplied) return null;
+  const sourceValue = Number(sourceAmount.value);
+  const fxRate = Number(exchangeRateApplied);
+  if (!Number.isFinite(sourceValue) || !Number.isFinite(fxRate)) return null;
+  return { value: (sourceValue * fxRate).toFixed(2), currency: statementCurrency };
+}
+
 function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function parseNumber(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function moneyFromNumber(value: number, currency: IsoCurrency): ParsedMoney {
+  return { value: Math.abs(value).toFixed(2), currency };
+}
+
+function extractStatementCurrency(text: string): IsoCurrency {
+  const explicitCurrency = text.match(/\bCurrency\s+([A-Z]{3})\b/i);
+  const openingBalanceCurrency = text.match(/\bOpening Balance\s+([A-Z]{3}|RM)\b/i);
+  return toIsoCurrency(explicitCurrency?.[1] ?? openingBalanceCurrency?.[1]) ?? "MYR";
+}
+
+function extractOpeningBalance(text: string): number | null {
+  const match = text.match(/\bOpening Balance\s+(?:[A-Z]{3}|RM)\s+([0-9][0-9,]*\.\d{2})/i);
+  return parseNumber(match?.[1]);
+}
+
+function buildTextRecord(input: {
+  date: string;
+  description: string;
+  amount: number;
+  balance: number;
+  previousBalance: number | null;
+  reference: string;
+  rowNumber: number;
+  sourceFileId: string;
+  accountId: string;
+  currency: IsoCurrency;
+}): BankStatementTransaction {
+  const amountCurrency = input.currency;
+  const delta = input.previousBalance === null ? input.amount : input.balance - input.previousBalance;
+  const creditDebitIndicator: "CRDT" | "DBIT" = delta < 0 ? "DBIT" : "CRDT";
+  const statementAmount = moneyFromNumber(input.amount, amountCurrency);
+  const sourceAmount = extractSourceAmount(input.description, amountCurrency);
+  const exchangeRateApplied = extractFxRate(input.description);
+  const bankFeeDeducted = extractBankFee(input.description);
+  const derivedAmountReceived = deriveAmountReceived(sourceAmount, exchangeRateApplied, amountCurrency);
+  const invoiceFromDesc = extractInvoiceNumber(input.description);
+  const transferReferenceFromDesc = extractTransferReference(input.description);
+  const reference = input.reference || transferReferenceFromDesc || invoiceFromDesc || null;
+
+  return {
+    schemaVersion: "1.0.0",
+    internalTxId: `txn_${input.sourceFileId}_row${String(input.rowNumber).padStart(3, "0")}`,
+    accountId: input.accountId,
+    bookingDate: normalize_date(input.date) ?? input.date,
+    valueDate: null,
+    creditDebitIndicator,
+    amount: statementAmount,
+    amountReceived: creditDebitIndicator === "CRDT" ? derivedAmountReceived ?? statementAmount : null,
+    sourceAmount,
+    exchangeRateApplied,
+    bankFeeDeducted,
+    feeCurrency: bankFeeDeducted?.currency ?? null,
+    netCreditAmount: creditDebitIndicator === "CRDT" ? statementAmount : null,
+    acctSvcrRef: reference,
+    referenceNo: reference,
+    ttNo: transferReferenceFromDesc,
+    normalizedReference: normalize_reference(reference ?? input.description),
+    endToEndId: null,
+    txId: transferReferenceFromDesc,
+    debtorName: null,
+    debtorNormalizedName: null,
+    debtorAccount: null,
+    creditorName: null,
+    creditorNormalizedName: null,
+    creditorAccount: null,
+    remittanceInformation: {
+      raw: input.description,
+      structured: {
+        invoiceNumber: invoiceFromDesc,
+        creditorReference: reference,
+        additionalInfo: input.description,
+      },
+    },
+    description: input.description,
+    rawDescription: input.description,
+    remarks: input.description,
+    sourceFileId: input.sourceFileId,
+    sourceRowNumber: input.rowNumber,
+    warnings: [],
+  };
 }
 
 // ─── Row → BankStatementTransaction ──────────────────────────────────────────
@@ -154,13 +308,12 @@ function buildRecord(
 
   // Explicit currency column (optional)
   const rawCurrencyCol = get("currency").toUpperCase();
-  const currencyFromCol: MvpCurrency | null =
-    rawCurrencyCol.length === 3 && MVP_CURRENCIES.has(rawCurrencyCol) ? (rawCurrencyCol as MvpCurrency) : null;
+  const currencyFromCol: IsoCurrency | null = isIsoCurrencyCode(rawCurrencyCol) ? rawCurrencyCol : null;
 
   // Amount + direction
   let creditDebitIndicator: "CRDT" | "DBIT" = "CRDT";
   let amountValue: string | null = null;
-  let amountCurrency: MvpCurrency = currencyFromCol ?? "MYR";
+  let amountCurrency: IsoCurrency = currencyFromCol ?? "MYR";
 
   if (csvFormat === "A") {
     const rawAmount = get("amount");
@@ -201,10 +354,16 @@ function buildRecord(
 
   // Remittance — extract INV-XXXX from description
   const invoiceFromDesc = rawDescription ? extractInvoiceNumber(rawDescription) : null;
+  const transferReferenceFromDesc = rawDescription ? extractTransferReference(rawDescription) : null;
+  const sourceAmount = rawDescription ? extractSourceAmount(rawDescription, amountCurrency) : null;
+  const exchangeRateApplied = rawDescription ? extractFxRate(rawDescription) : null;
+  const bankFeeDeducted = rawDescription ? extractBankFee(rawDescription) : null;
+  const derivedAmountReceived = deriveAmountReceived(sourceAmount, exchangeRateApplied, amountCurrency);
 
   // Bank reference
-  const rawBankRef = get("bankRef");
+  const rawBankRef = get("bankRef") || transferReferenceFromDesc || "";
   const comparableReference = rawBankRef || invoiceFromDesc || rawDescription || null;
+  const statementAmount = { value: amountValue ?? "0.00", currency: amountCurrency };
 
   return {
     schemaVersion: "1.0.0",
@@ -213,11 +372,19 @@ function buildRecord(
     bookingDate,
     valueDate: valueDate ?? null,
     creditDebitIndicator,
-    amount: { value: amountValue ?? "0.00", currency: amountCurrency },
+    amount: statementAmount,
+    amountReceived: creditDebitIndicator === "CRDT" ? derivedAmountReceived ?? statementAmount : null,
+    sourceAmount,
+    exchangeRateApplied,
+    bankFeeDeducted,
+    feeCurrency: bankFeeDeducted?.currency ?? null,
+    netCreditAmount: creditDebitIndicator === "CRDT" ? statementAmount : null,
     acctSvcrRef: rawBankRef || null,
+    referenceNo: rawBankRef || null,
+    ttNo: transferReferenceFromDesc,
     normalizedReference: normalize_reference(comparableReference),
     endToEndId: null,
-    txId: null,
+    txId: transferReferenceFromDesc,
     debtorName: rawDebtorName || null,
     debtorNormalizedName: normalize_party_name(rawDebtorName || null),
     debtorAccount: null,
@@ -226,10 +393,15 @@ function buildRecord(
     creditorAccount: null,
     remittanceInformation: {
       raw: rawDescription || null,
-      structured: { invoiceNumber: invoiceFromDesc },
+      structured: {
+        invoiceNumber: invoiceFromDesc,
+        creditorReference: rawBankRef || null,
+        additionalInfo: rawDescription || null,
+      },
     },
     description: rawDescription || null,
     rawDescription: rawDescription || null,
+    remarks: rawDescription || null,
     sourceFileId,
     sourceRowNumber: rowNumber,
     warnings,
@@ -282,4 +454,52 @@ export function parseBankStatements(
   );
 
   return { records, warnings: batchWarnings };
+}
+
+export function parseBankStatementText(
+  text: string,
+  sourceFileId: string,
+  accountId: string,
+): ParseBankStatementsResult {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const currency = extractStatementCurrency(text);
+  let previousBalance = extractOpeningBalance(text);
+  const records: BankStatementTransaction[] = [];
+  const warnings: Warning[] = [];
+
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^(\d{4}-\d{2}-\d{2})\s+(.+?)\s+([0-9][0-9,]*\.\d{2})\s+([0-9][0-9,]*\.\d{2})\s+(\S+)$/);
+    if (!match) continue;
+
+    const amount = parseNumber(match[3]);
+    const balance = parseNumber(match[4]);
+    if (amount === null || balance === null) {
+      warnings.push({ code: "INVALID_MONEY_FORMAT", message: `Could not parse amount or balance from line "${line}"`, field: "amount.value" });
+      continue;
+    }
+
+    records.push(buildTextRecord({
+      date: match[1]!,
+      description: match[2]!,
+      amount,
+      balance,
+      previousBalance,
+      reference: match[5]!,
+      rowNumber: index + 1,
+      sourceFileId,
+      accountId,
+      currency,
+    }));
+    previousBalance = balance;
+  }
+
+  if (records.length === 0 && text.includes("Transaction Details")) {
+    warnings.push({
+      code: "MISSING_REQUIRED_COLUMN",
+      message: "PDF text contained a transaction section, but no transaction rows matched the bank statement parser.",
+      field: "bank_statement"
+    });
+  }
+
+  return { records, warnings };
 }

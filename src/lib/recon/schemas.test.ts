@@ -154,7 +154,9 @@ describe("input schemas", () => {
 
   it("rejects lowercase and unsupported currencies", () => {
     expect(expectedPaymentRecordSchema.safeParse({ ...expectedPayment, invoiceCurrency: "usd" }).success).toBe(false);
-    expect(expectedPaymentRecordSchema.safeParse({ ...expectedPayment, invoiceCurrency: "JPY" }).success).toBe(false);
+    expect(expectedPaymentRecordSchema.safeParse({ ...expectedPayment, invoiceCurrency: "JPY", amountDue: { value: "10.00", currency: "JPY" } }).success).toBe(true);
+    expect(expectedPaymentRecordSchema.safeParse({ ...expectedPayment, invoiceCurrency: "THB", amountDue: { value: "10.00", currency: "THB" } }).success).toBe(true);
+    expect(expectedPaymentRecordSchema.safeParse({ ...expectedPayment, invoiceCurrency: "USDD" }).success).toBe(false);
   });
 
   it("rejects invalid dates and negative money", () => {

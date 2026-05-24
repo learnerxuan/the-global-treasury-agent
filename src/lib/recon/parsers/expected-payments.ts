@@ -79,12 +79,15 @@ function mapColumns(headers: string[]): { columnMap: ColumnMap; warnings: Warnin
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const MVP_CURRENCIES = new Set(["MYR", "USD", "SGD", "EUR"]);
-type MvpCurrency = "MYR" | "USD" | "SGD" | "EUR";
+type IsoCurrency = string;
+
+function isIsoCurrencyCode(value: string | null | undefined): value is IsoCurrency {
+  return Boolean(value && /^[A-Z]{3}$/.test(value));
+}
 
 function extractCurrencyFromAmount(raw: string): { currencyCode: string | null; amountStr: string } {
   const match = raw.trim().match(/^([A-Z]{3})\s+(.+)$/);
-  if (match && MVP_CURRENCIES.has(match[1]!)) return { currencyCode: match[1]!, amountStr: match[2]! };
+  if (match && isIsoCurrencyCode(match[1])) return { currencyCode: match[1]!, amountStr: match[2]! };
   return { currencyCode: null, amountStr: raw };
 }
 
@@ -151,16 +154,17 @@ function buildRecord(
 
   // Currency — embedded in amount > explicit column > default USD
   const rawCurrency = get("currency").toUpperCase();
-  const resolvedCurrency = embeddedCurrency ?? (rawCurrency.length === 3 ? rawCurrency : null);
-  if (resolvedCurrency && !MVP_CURRENCIES.has(resolvedCurrency)) {
-    warnings.push({ code: "INVALID_CURRENCY", message: `Currency "${resolvedCurrency}" is not supported (MYR, USD, SGD, EUR)`, field: "invoiceCurrency" });
+  const explicitCurrency = rawCurrency.length > 0 ? rawCurrency : null;
+  const resolvedCurrency = embeddedCurrency ?? explicitCurrency;
+  if (explicitCurrency && !isIsoCurrencyCode(explicitCurrency)) {
+    warnings.push({ code: "INVALID_CURRENCY", message: `Currency "${explicitCurrency}" is not a valid 3-letter ISO currency code`, field: "invoiceCurrency" });
   }
-  const invoiceCurrency: MvpCurrency = resolvedCurrency && MVP_CURRENCIES.has(resolvedCurrency) ? (resolvedCurrency as MvpCurrency) : "USD";
+  const invoiceCurrency = isIsoCurrencyCode(resolvedCurrency) ? resolvedCurrency : "USD";
   fieldConfidence["amountDue.currency"] = resolvedCurrency ? 1 : 0.5;
 
   // Settlement currency
   const rawSettlementCurrency = get("settlementCurrency").toUpperCase();
-  const settlementCurrency: MvpCurrency = rawSettlementCurrency && MVP_CURRENCIES.has(rawSettlementCurrency) ? (rawSettlementCurrency as MvpCurrency) : "MYR";
+  const settlementCurrency = isIsoCurrencyCode(rawSettlementCurrency) ? rawSettlementCurrency : "MYR";
 
   // Payment terms
   const rawPaymentTerms = get("paymentTerms");

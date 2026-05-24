@@ -3,6 +3,46 @@
 import { FormEvent, useMemo, useState } from "react";
 
 type DocumentRole = "invoice" | "bank_statement" | "payment_proof";
+type UploadKey = "invoices" | "bankStatements" | "paymentProofs";
+type UploadStatus = "ready" | "pending" | "done" | "error";
+
+type MoneyExtraction = {
+  value: string | null;
+  currency: string | null;
+};
+
+type BankTransactionExtraction = {
+  transactionDate: string | null;
+  valueDate: string | null;
+  description: string | null;
+  payerName: string | null;
+  amount: MoneyExtraction;
+  amountReceived?: MoneyExtraction | null;
+  sourceAmount?: MoneyExtraction | null;
+  exchangeRateApplied?: string | null;
+  bankFeeDeducted?: MoneyExtraction | null;
+  feeCurrency?: string | null;
+  netCreditAmount?: MoneyExtraction | null;
+  reference?: string | null;
+  referenceNo?: string | null;
+  ttNo?: string | null;
+  remarks?: string | null;
+};
+
+type PaymentProofExtraction = {
+  payerName: string | null;
+  creditorName: string | null;
+  paymentDate: string | null;
+  paidAmount: MoneyExtraction;
+  reference: string | null;
+  paymentStatus: string | null;
+  providerOrBankName: string | null;
+  exchangeRate: string | null;
+  grossAmount?: MoneyExtraction | null;
+  feeAmount?: MoneyExtraction | null;
+  feeCurrency?: string | null;
+  netAmount?: MoneyExtraction | null;
+};
 
 type ExtractionResult = {
   role: DocumentRole;
@@ -10,35 +50,76 @@ type ExtractionResult = {
   confidence: number;
   summary: string;
   invoices: unknown[];
-  bankTransactions: unknown[];
-  paymentProofs: unknown[];
+  bankTransactions: BankTransactionExtraction[];
+  paymentProofs: PaymentProofExtraction[];
   warnings: string[];
 };
 
-type ApiResult = {
-  batchId: string;
+type RoleApiResult = {
+  ingestionId: string;
+  role: DocumentRole;
   uploadedAt: string;
-  documents: Record<DocumentRole, Array<{ fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>>;
-  extractions: Record<DocumentRole, ExtractionResult[]>;
+  documents: Array<{ fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>;
+  extractions: ExtractionResult[];
   codeTools: {
     parsedInputBatch: unknown;
     normalizedInputBatch: unknown;
   };
+  storage: {
+    ingestionDir: string;
+    summaryPath: string;
+    waitingRecordPaths: string[];
+  };
+  mockReconciliationRun: {
+    runId: string;
+    status: string;
+    message: string;
+    nextStep: string;
+    path: string;
+  } | null;
 };
 
-type UploadKey = "invoices" | "bankStatements" | "paymentProofs";
+type UploadCard = {
+  key: UploadKey;
+  role: DocumentRole;
+  endpoint: string;
+  eyebrow: string;
+  title: string;
+  copy: string;
+};
 
-const uploadCards: Array<{ key: UploadKey; role: DocumentRole; eyebrow: string; title: string; copy: string }> = [
-  { key: "invoices", role: "invoice", eyebrow: "Expected payment sources", title: "Invoices / Expected Payments", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" },
-  { key: "bankStatements", role: "bank_statement", eyebrow: "Cash movement sources", title: "Bank Statements", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" },
-  { key: "paymentProofs", role: "payment_proof", eyebrow: "Customer evidence", title: "Payment Proofs", copy: "Upload one or many PDF, image, MD, XLSX, CSV, or TXT files" }
+const uploadCards: UploadCard[] = [
+  {
+    key: "invoices",
+    role: "invoice",
+    endpoint: "/api/invoices/extractions",
+    eyebrow: "Expected payments",
+    title: "Invoices",
+    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
+  },
+  {
+    key: "bankStatements",
+    role: "bank_statement",
+    endpoint: "/api/bank-statements/extractions",
+    eyebrow: "Cash movement",
+    title: "Bank Statements",
+    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
+  },
+  {
+    key: "paymentProofs",
+    role: "payment_proof",
+    endpoint: "/api/payment-proofs/extractions",
+    eyebrow: "Customer evidence",
+    title: "Payment Proofs",
+    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
+  }
 ];
 
-const roleLabels: Record<DocumentRole, string> = {
-  invoice: "invoice",
-  bank_statement: "bank statement",
-  payment_proof: "payment proof"
-};
+const accept = ".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.csv,.xlsx,application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function formatFile(file: File): string {
+  return `${file.name} - ${file.type || "unknown type"} - ${Math.ceil(file.size / 1024)} KB`;
+}
 
 function recordCount(result: ExtractionResult): number {
   if (result.role === "invoice") return result.invoices.length;
@@ -50,8 +131,11 @@ function totalRecordCount(results: ExtractionResult[]): number {
   return results.reduce((total, result) => total + recordCount(result), 0);
 }
 
-function formatFile(file: File): string {
-  return `${file.name} - ${file.type || "unknown type"} - ${Math.ceil(file.size / 1024)} KB`;
+function statusCopy(status: UploadStatus): string {
+  if (status === "pending") return "Extracting";
+  if (status === "done") return "Stored";
+  if (status === "error") return "Failed";
+  return "Ready";
 }
 
 export default function Home() {
@@ -60,59 +144,53 @@ export default function Home() {
     bankStatements: [],
     paymentProofs: []
   });
-  const [status, setStatus] = useState<"ready" | "pending" | "readyDone" | "error">("ready");
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ApiResult | null>(null);
-  const structuredExtractionJson = result
-    ? {
-        batchId: result.batchId,
-        uploadedAt: result.uploadedAt,
-        documents: result.documents,
-        extractions: result.extractions
-      }
-    : {};
+  const [statuses, setStatuses] = useState<Record<UploadKey, UploadStatus>>({
+    invoices: "ready",
+    bankStatements: "ready",
+    paymentProofs: "ready"
+  });
+  const [errors, setErrors] = useState<Record<UploadKey, string | null>>({
+    invoices: null,
+    bankStatements: null,
+    paymentProofs: null
+  });
+  const [results, setResults] = useState<Partial<Record<UploadKey, RoleApiResult>>>({});
+  const latestResult = useMemo(() => {
+    const values = Object.values(results);
+    return values.length > 0 ? values[values.length - 1] : null;
+  }, [results]);
 
-  const statusCopy = useMemo(() => {
-    if (status === "pending") return "AI provider is selecting tools";
-    if (status === "readyDone") return "Extraction complete";
-    if (status === "error") return "Extraction failed";
-    return "Ready";
-  }, [status]);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function submitUpload(event: FormEvent<HTMLFormElement>, card: UploadCard) {
     event.preventDefault();
-    setError(null);
-
-    for (const card of uploadCards) {
-      if (files[card.key].length === 0) {
-        setStatus("error");
-        setError("Upload at least one file for invoices, bank statements, and payment proofs.");
-        return;
-      }
+    const selected = files[card.key];
+    if (selected.length === 0) {
+      setStatuses((current) => ({ ...current, [card.key]: "error" }));
+      setErrors((current) => ({ ...current, [card.key]: "Upload at least one file." }));
+      return;
     }
 
     const formData = new FormData();
-    for (const card of uploadCards) {
-      for (const file of files[card.key]) {
-        formData.append(card.key, file);
-      }
+    for (const file of selected) {
+      formData.append("files", file);
     }
 
-    setStatus("pending");
-    const response = await fetch("/api/reconciliation/extractions", {
+    setStatuses((current) => ({ ...current, [card.key]: "pending" }));
+    setErrors((current) => ({ ...current, [card.key]: null }));
+
+    const response = await fetch(card.endpoint, {
       method: "POST",
       body: formData
     });
     const body = await response.json();
 
     if (!response.ok) {
-      setStatus("error");
-      setError(body.error ?? "Extraction failed.");
+      setStatuses((current) => ({ ...current, [card.key]: "error" }));
+      setErrors((current) => ({ ...current, [card.key]: body.error ?? "Extraction failed." }));
       return;
     }
 
-    setResult(body as ApiResult);
-    setStatus("readyDone");
+    setResults((current) => ({ ...current, [card.key]: body as RoleApiResult }));
+    setStatuses((current) => ({ ...current, [card.key]: "done" }));
   }
 
   return (
@@ -120,40 +198,45 @@ export default function Home() {
       <header className="topbar">
         <div>
           <p className="eyebrow">ReconPilot MVP</p>
-          <h1>Batch Extraction</h1>
+          <h1>Separate Extraction Storage</h1>
           <p className="lede">
-            Upload invoices, bank statements, and customer payment proofs in batches. The API stores every file, prepares readable evidence, the AI extraction provider selects the extraction route, and Code Tools parse and normalize the finance JSON.
+            Upload invoices, bank statements, and payment proofs independently. Each file is extracted, parsed, normalized, and written to local waiting storage.
           </p>
         </div>
         <div className="rule-card">
-          <span className="rule-label">MVP boundary</span>
-          <span>In a company deployment, invoices and bank rows usually arrive through system integrations. This MVP keeps the same batch API boundary while letting the browser provide many source files.</span>
+          <span className="rule-label">Current slice</span>
+          <span>Upload to local storage only. Reconciliation matching will read these waiting records in the next step.</span>
         </div>
       </header>
 
-      <form className="upload-form" onSubmit={onSubmit}>
-        <section className="upload-grid" aria-label="Reconciliation input uploads">
-          {uploadCards.map((card) => (
-            <article className={`panel intake-panel ${card.role}`} key={card.key}>
+      <section className="upload-grid" aria-label="Separate uploads">
+        {uploadCards.map((card) => {
+          const result = results[card.key];
+          const status = statuses[card.key];
+          return (
+            <form className={`panel intake-panel ${card.role}`} key={card.key} onSubmit={(event) => submitUpload(event, card)}>
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">{card.eyebrow}</p>
                   <h2>{card.title}</h2>
                 </div>
-              </div>
-              <label className="drop-zone">
-                <span className="drop-icon" aria-hidden="true">
-                  +
+                <span className={`status-pill ${status === "error" ? "review" : status === "pending" ? "pending" : status === "done" ? "ready" : "neutral"}`}>
+                  {statusCopy(status)}
                 </span>
-                <span className="drop-title">Choose file</span>
+              </div>
+
+              <label className="drop-zone">
+                <span className="drop-icon" aria-hidden="true">+</span>
+                <span className="drop-title">Choose files</span>
                 <span className="drop-copy">{card.copy}</span>
                 <input
                   type="file"
                   multiple
-                  accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.md,.markdown,.csv,.xlsx,application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  accept={accept}
                   onChange={(event) => setFiles((current) => ({ ...current, [card.key]: Array.from(event.target.files ?? []) }))}
                 />
               </label>
+
               <div className="selected-file">
                 <strong>{files[card.key].length === 0 ? "No files selected" : `${files[card.key].length} selected`}</strong>
                 {files[card.key].length > 0 ? (
@@ -164,99 +247,65 @@ export default function Home() {
                   </ul>
                 ) : null}
               </div>
-            </article>
-          ))}
-        </section>
 
-        <section className="run-bar">
-          <div>
-            <p className="eyebrow">Extraction Agent</p>
-            <h2>The AI extraction provider chooses the route for every document</h2>
-          </div>
-          <span className={`status-pill ${status === "error" ? "review" : status === "pending" ? "pending" : status === "readyDone" ? "ready" : "neutral"}`}>
-            {statusCopy}
-          </span>
-          <button className="primary-button" disabled={status === "pending"} type="submit">
-            Extract all files
-          </button>
-        </section>
-      </form>
+              <button className="primary-button" disabled={status === "pending"} type="submit">
+                Extract {card.title.toLowerCase()}
+              </button>
 
-      {error ? <div className="error-banner">{error}</div> : null}
+              {errors[card.key] ? <div className="error-banner">{errors[card.key]}</div> : null}
 
-      <section className="results-grid" aria-label="Extraction result summaries">
-        {(["invoice", "bank_statement", "payment_proof"] as DocumentRole[]).map((role) => {
-          const extraction = result?.extractions[role];
-          const document = result?.documents[role];
-          const title = role === "invoice" ? "Invoice Extractions" : role === "bank_statement" ? "Bank Statement Extractions" : "Payment Proof Extractions";
-          return (
-            <article className="panel result-panel" key={role}>
-              <p className="eyebrow">{title}</p>
-              {extraction && document ? (
+              {result ? (
                 <div className="result-body">
                   <div className="summary-row">
-                    <strong>{extraction.length} files</strong>
-                    <span>{totalRecordCount(extraction)} records</span>
+                    <strong>{result.documents.length} file(s)</strong>
+                    <span>{totalRecordCount(result.extractions)} waiting record(s)</span>
                   </div>
-                  <div className="extraction-list">
-                    {extraction.map((item, index) => (
-                      <section className="extraction-item" key={`${item.role}-${document[index]?.fileName ?? index}`}>
-                        <div className="summary-row">
-                          <strong>{Math.round(item.confidence * 100)}% confidence</strong>
-                          <span>{recordCount(item)} records</span>
+                  <dl className="mini-grid">
+                    <div>
+                      <dt>Ingestion</dt>
+                      <dd>{result.ingestionId}</dd>
+                    </div>
+                    <div>
+                      <dt>Stored records</dt>
+                      <dd>{result.storage.waitingRecordPaths.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Local folder</dt>
+                      <dd>{result.storage.ingestionDir}</dd>
+                    </div>
+                    {result.mockReconciliationRun ? (
+                      <>
+                        <div>
+                          <dt>Recon mock</dt>
+                          <dd>{result.mockReconciliationRun.status}</dd>
                         </div>
-                        <p>{item.summary}</p>
-                        <dl className="mini-grid">
-                          <div>
-                            <dt>Selected tool</dt>
-                            <dd>{item.selectedTool}</dd>
-                          </div>
-                          <div>
-                            <dt>Source</dt>
-                            <dd>{document[index]?.fileName}</dd>
-                          </div>
-                          <div>
-                            <dt>Observed text</dt>
-                            <dd>{document[index]?.readableTextLength ?? 0} chars</dd>
-                          </div>
-                        </dl>
-                        {item.warnings.length > 0 ? (
-                          <ul>{item.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                        ) : (
-                          <p>No extraction warnings.</p>
-                        )}
-                      </section>
-                    ))}
-                  </div>
+                        <div>
+                          <dt>Mock run file</dt>
+                          <dd>{result.mockReconciliationRun.path}</dd>
+                        </div>
+                      </>
+                    ) : null}
+                  </dl>
+                  {result.mockReconciliationRun ? (
+                    <p>{result.mockReconciliationRun.message}</p>
+                  ) : null}
                 </div>
-              ) : (
-                <div className="result-body empty">Waiting for {roleLabels[role]} batch extraction.</div>
-              )}
-            </article>
+              ) : null}
+            </form>
           );
         })}
       </section>
 
-      <section className="details-grid" aria-label="Raw API result">
+      <section className="details-grid" aria-label="Latest stored result">
         <article className="panel json-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">API Response</p>
-              <h2>Structured Extraction JSON</h2>
+              <p className="eyebrow">Latest Upload</p>
+              <h2>Stored Extraction JSON</h2>
             </div>
             <span className="status-pill neutral">JSON</span>
           </div>
-          <pre tabIndex={0}>{JSON.stringify(structuredExtractionJson, null, 2)}</pre>
-        </article>
-        <article className="panel json-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Code Tools Output</p>
-              <h2>Parsed + Normalized JSON</h2>
-            </div>
-            <span className="status-pill neutral">JSON</span>
-          </div>
-          <pre tabIndex={0}>{JSON.stringify(result?.codeTools ?? {}, null, 2)}</pre>
+          <pre tabIndex={0}>{JSON.stringify(latestResult ?? {}, null, 2)}</pre>
         </article>
       </section>
     </main>

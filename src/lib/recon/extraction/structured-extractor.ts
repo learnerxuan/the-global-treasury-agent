@@ -32,7 +32,17 @@ export const bankTransactionExtractionSchema = z.object({
   description: z.string().nullable(),
   payerName: z.string().nullable(),
   amount: moneyExtractionSchema,
-  reference: z.string().nullable()
+  creditDebitIndicator: z.enum(["CRDT", "DBIT"]).nullable().optional(),
+  amountReceived: moneyExtractionSchema.nullable().optional(),
+  sourceAmount: moneyExtractionSchema.nullable().optional(),
+  exchangeRateApplied: z.string().nullable().optional(),
+  bankFeeDeducted: moneyExtractionSchema.nullable().optional(),
+  feeCurrency: z.string().nullable().optional(),
+  netCreditAmount: moneyExtractionSchema.nullable().optional(),
+  reference: z.string().nullable().optional(),
+  referenceNo: z.string().nullable().optional(),
+  ttNo: z.string().nullable().optional(),
+  remarks: z.string().nullable().optional()
 });
 
 export const paymentProofExtractionSchema = z.object({
@@ -43,7 +53,11 @@ export const paymentProofExtractionSchema = z.object({
   reference: z.string().nullable(),
   paymentStatus: z.string().nullable(),
   providerOrBankName: z.string().nullable(),
-  exchangeRate: z.string().nullable()
+  exchangeRate: z.string().nullable(),
+  grossAmount: moneyExtractionSchema.nullable().optional(),
+  feeAmount: moneyExtractionSchema.nullable().optional(),
+  feeCurrency: z.string().nullable().optional(),
+  netAmount: moneyExtractionSchema.nullable().optional()
 });
 
 export const structuredDocumentExtractionSchema = z.object({
@@ -72,11 +86,11 @@ export type StructuredExtractionClient = Pick<ChutesClient, "chat">;
 
 const roleInstructions: Record<DocumentRole, string> = {
   invoice:
-    "Extract invoice or accounts receivable expected payment records. Focus on invoice number, customer/debtor name, issue date, due date, amount due, currency, and payment reference.",
+    "Extract invoice or accounts receivable expected payment records. Focus on invoice number, customer/debtor name, issue date, due date, amount due, ISO 4217 currency code, and payment reference.",
   bank_statement:
-    "Extract bank statement credit/deposit transactions. Focus on transaction date, value date, description, payer/debtor name, received amount, currency, and remittance/reference.",
+    "Extract bank statement credit/deposit transactions. Focus on transaction date, value date, description/narration, payer/debtor name, account currency amount received, source foreign amount when mentioned, exchange rate applied, local bank fee deducted, fee currency, net credit amount, reference number, TT/SWIFT number, and remarks.",
   payment_proof:
-    "Extract customer payment proof or remittance evidence. Focus on payer, creditor/beneficiary, payment date, paid amount, currency, reference, payment status, bank/provider, and exchange rate if present."
+    "Extract customer payment proof or remittance evidence. Focus on payer, creditor/beneficiary, payment date, gross sent amount, upstream/intermediary fee amount, fee currency, net sent amount, paid amount, currency, reference, payment status, bank/provider, and exchange rate if present."
 };
 
 function extractJsonObject(value: string): unknown {
@@ -89,7 +103,16 @@ function extractJsonObject(value: string): unknown {
     throw new Error("Chutes extraction response did not contain a JSON object.");
   }
 
-  return JSON.parse(candidate.slice(start, end + 1));
+  const json = candidate.slice(start, end + 1);
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown JSON parse error";
+    const position = message.match(/position (\d+)/)?.[1];
+    const index = position ? Number(position) : -1;
+    const nearby = index >= 0 ? json.slice(Math.max(0, index - 180), Math.min(json.length, index + 180)) : json.slice(0, 360);
+    throw new Error(`Extraction agent returned malformed JSON: ${message}. Nearby content: ${nearby}`);
+  }
 }
 
 function truncateText(text: string): string {
@@ -107,6 +130,46 @@ function keepOnlyExpectedRoleRecords(
     bankTransactions: expectedRole === "bank_statement" ? extraction.bankTransactions : [],
     paymentProofs: expectedRole === "payment_proof" ? extraction.paymentProofs : []
   };
+}
+
+async function parseStructuredExtractionWithRepair(
+  client: StructuredExtractionClient,
+  content: string,
+  expectedRole: DocumentRole
+): Promise<StructuredDocumentExtraction> {
+  try {
+    return structuredDocumentExtractionSchema.parse(extractJsonObject(content));
+  } catch (error) {
+    const firstError = error instanceof Error ? error.message : "Unknown JSON parse error";
+    const repaired = await client.chat({
+      maxTokens: 3000,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You repair malformed JSON for ReconPilot. Return only valid JSON. Do not add explanation, markdown, or new fields."
+        },
+        {
+          role: "user",
+          content: [
+            "Repair this extraction response into valid JSON that matches the exact ReconPilot extraction schema.",
+            `The expected document role is ${expectedRole}; keep only that role's array populated and set the other record arrays to [].`,
+            `Original parse error: ${firstError}`,
+            "",
+            "Malformed response:",
+            content
+          ].join("\n")
+        }
+      ]
+    });
+
+    try {
+      return structuredDocumentExtractionSchema.parse(extractJsonObject(repaired));
+    } catch (repairError) {
+      const secondError = repairError instanceof Error ? repairError.message : "Unknown JSON parse error";
+      throw new Error(`Unable to parse extraction JSON after repair attempt. First error: ${firstError}. Repair error: ${secondError}`);
+    }
+  }
 }
 
 export function createChutesStructuredExtractor(client: StructuredExtractionClient = new ChutesClient()): StructuredExtractor {
@@ -147,11 +210,11 @@ export function createChutesStructuredExtractor(client: StructuredExtractionClie
             "",
             "Fill only the array for the current document role:",
             "- role invoice: fill invoices only; bankTransactions and paymentProofs must be [].",
-            "- role bank_statement: fill bankTransactions only; invoices and paymentProofs must be [].",
-            "- role payment_proof: fill paymentProofs only; invoices and bankTransactions must be [].",
+        "- role bank_statement: fill bankTransactions only; invoices and paymentProofs must be []. For bank statements, amount is the final transaction amount shown by the bank. Fill creditDebitIndicator as CRDT for incoming credits/deposits and DBIT for outgoing debits/withdrawals/charges. If the narration contains FX and local receiver-bank fees, also fill sourceAmount, exchangeRateApplied, bankFeeDeducted, feeCurrency, netCreditAmount, referenceNo, ttNo, and remarks. Use uppercase 3-letter ISO currency codes.",
+            "- role payment_proof: fill paymentProofs only; invoices and bankTransactions must be []. If the proof shows upstream/intermediary fees before conversion, fill grossAmount, feeAmount, feeCurrency, and netAmount. Use uppercase 3-letter ISO currency codes.",
             "",
             "Return JSON with this exact shape:",
-            '{"role":"invoice|bank_statement|payment_proof","selectedTool":"parse_pdf_text|parse_pdf_table|parse_csv_text|parse_spreadsheet|parse_image_ocr|manual_correction","confidence":0.0,"summary":"","invoices":[{"invoiceNumber":null,"customerName":null,"issueDate":null,"dueDate":null,"amountDue":{"value":null,"currency":null},"paymentReference":null}],"bankTransactions":[{"transactionDate":null,"valueDate":null,"description":null,"payerName":null,"amount":{"value":null,"currency":null},"reference":null}],"paymentProofs":[{"payerName":null,"creditorName":null,"paymentDate":null,"paidAmount":{"value":null,"currency":null},"reference":null,"paymentStatus":null,"providerOrBankName":null,"exchangeRate":null}],"warnings":[]}',
+        '{"role":"invoice|bank_statement|payment_proof","selectedTool":"parse_pdf_text|parse_pdf_table|parse_csv_text|parse_spreadsheet|parse_image_ocr|manual_correction","confidence":0.0,"summary":"","invoices":[{"invoiceNumber":null,"customerName":null,"issueDate":null,"dueDate":null,"amountDue":{"value":null,"currency":null},"paymentReference":null}],"bankTransactions":[{"transactionDate":null,"valueDate":null,"description":null,"payerName":null,"amount":{"value":null,"currency":null},"creditDebitIndicator":"CRDT|DBIT|null","amountReceived":{"value":null,"currency":null},"sourceAmount":{"value":null,"currency":null},"exchangeRateApplied":null,"bankFeeDeducted":{"value":null,"currency":null},"feeCurrency":null,"netCreditAmount":{"value":null,"currency":null},"reference":null,"referenceNo":null,"ttNo":null,"remarks":null}],"paymentProofs":[{"payerName":null,"creditorName":null,"paymentDate":null,"paidAmount":{"value":null,"currency":null},"reference":null,"paymentStatus":null,"providerOrBankName":null,"exchangeRate":null,"grossAmount":{"value":null,"currency":null},"feeAmount":{"value":null,"currency":null},"feeCurrency":null,"netAmount":{"value":null,"currency":null}}],"warnings":[]}',
             "",
             `Document role: ${input.role}`,
             `File name: ${input.fileName}`,
@@ -165,7 +228,7 @@ export function createChutesStructuredExtractor(client: StructuredExtractionClie
       ]
     });
 
-    const parsed = structuredDocumentExtractionSchema.parse(extractJsonObject(content));
+    const parsed = await parseStructuredExtractionWithRepair(client, content, input.role);
     if (parsed.role !== input.role) {
       return keepOnlyExpectedRoleRecords(
         { ...parsed, role: input.role, warnings: [...parsed.warnings, `Model returned role ${parsed.role}; server expected ${input.role}.`] },

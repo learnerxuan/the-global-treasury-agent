@@ -8,7 +8,6 @@ function inferMimeType(file: File): string {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv")) return "text/csv";
   if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (name.endsWith(".md") || name.endsWith(".markdown")) return "text/markdown";
   if (name.endsWith(".pdf")) return "application/pdf";
   if (name.endsWith(".png")) return "image/png";
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";

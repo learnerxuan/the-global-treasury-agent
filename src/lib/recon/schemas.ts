@@ -2,7 +2,9 @@ import { z } from "zod";
 
 export const schemaVersionLiteral = z.literal("1.0.0");
 
-export const mvpCurrencySchema = z.enum(["MYR", "USD", "SGD", "EUR"]);
+export const mvpCurrencySchema = z
+  .string()
+  .regex(/^[A-Z]{3}$/, "Currency must be an uppercase ISO 4217-style 3-letter code");
 
 export const isoDateSchema = z
   .string()
@@ -161,7 +163,15 @@ export const bankStatementTransactionSchema = z.object({
   valueDate: reconDateSchema.nullable(),
   creditDebitIndicator: z.enum(["CRDT", "DBIT"]),
   amount: moneyAmountSchema,
+  amountReceived: moneyAmountSchema.nullable().optional(),
+  sourceAmount: moneyAmountSchema.nullable().optional(),
+  exchangeRateApplied: z.string().nullable().optional(),
+  bankFeeDeducted: moneyAmountSchema.nullable().optional(),
+  feeCurrency: mvpCurrencySchema.nullable().optional(),
+  netCreditAmount: moneyAmountSchema.nullable().optional(),
   acctSvcrRef: z.string().nullable(),
+  referenceNo: z.string().nullable().optional(),
+  ttNo: z.string().nullable().optional(),
   normalizedReference: z.string().nullable(),
   endToEndId: z.string().nullable(),
   txId: z.string().nullable(),
@@ -174,6 +184,7 @@ export const bankStatementTransactionSchema = z.object({
   remittanceInformation: remittanceInformationSchema,
   description: z.string().nullable(),
   rawDescription: z.string().nullable(),
+  remarks: z.string().nullable().optional(),
   sourceFileId: z.string(),
   sourceRowNumber: z.number().int().positive().nullable(),
   warnings: z.array(warningSchema)
@@ -225,6 +236,7 @@ const paymentProofFinancialPayloadBaseSchema = z.object({
   endToEndId: z.string().nullable(),
   uetr: z.string().nullable(),
   feeAmount: moneyAmountSchema.nullable(),
+  feeCurrency: mvpCurrencySchema.nullable().optional(),
   netAmount: moneyAmountSchema.nullable(),
   sourceAmount: moneyAmountSchema.nullable(),
   targetAmount: moneyAmountSchema.nullable(),
