@@ -12,6 +12,7 @@ This folder contains the current planning and handoff documents for the Global T
 6. [CODE_TOOLS_PARSE_NORMALIZE_TODO.md](CODE_TOOLS_PARSE_NORMALIZE_TODO.md) - implementation checklist for Parse + Normalize.
 7. [AGENT_2_RECONCILIATION_ORCHESTRATOR_PLAN.md](AGENT_2_RECONCILIATION_ORCHESTRATOR_PLAN.md) - final Agent 2 + Reconciliation Tools implementation spec.
 8. [AGENT_2_RECONCILIATION_TODO.md](AGENT_2_RECONCILIATION_TODO.md) - implementation checklist for Agent 2 and Reconciliation Tools.
+9. [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) - local environment setup for NVIDIA now and Chutes later.
 
 ## Ownership
 

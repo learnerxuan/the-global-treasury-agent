@@ -7,8 +7,13 @@ export type DocumentRole = z.infer<typeof documentRoleSchema>;
 export const extractionToolNameSchema = z.enum(["parse_pdf_text", "parse_pdf_table", "parse_csv_text", "parse_spreadsheet", "parse_image_ocr", "manual_correction"]);
 export type ExtractionToolName = z.infer<typeof extractionToolNameSchema>;
 
+const moneyValueSchema = z.preprocess(
+  (value) => (typeof value === "number" ? String(value) : value),
+  z.string().nullable()
+);
+
 export const moneyExtractionSchema = z.object({
-  value: z.string().nullable(),
+  value: moneyValueSchema,
   currency: z.string().nullable()
 });
 
@@ -63,6 +68,7 @@ export type StructuredExtractionInput = {
 };
 
 export type StructuredExtractor = (input: StructuredExtractionInput) => Promise<StructuredDocumentExtraction>;
+export type StructuredExtractionClient = Pick<ChutesClient, "chat">;
 
 const roleInstructions: Record<DocumentRole, string> = {
   invoice:
@@ -91,7 +97,19 @@ function truncateText(text: string): string {
   return text.length > maxChars ? `${text.slice(0, maxChars)}\n[TRUNCATED]` : text;
 }
 
-export function createChutesStructuredExtractor(client = new ChutesClient()): StructuredExtractor {
+function keepOnlyExpectedRoleRecords(
+  extraction: StructuredDocumentExtraction,
+  expectedRole: DocumentRole
+): StructuredDocumentExtraction {
+  return {
+    ...extraction,
+    invoices: expectedRole === "invoice" ? extraction.invoices : [],
+    bankTransactions: expectedRole === "bank_statement" ? extraction.bankTransactions : [],
+    paymentProofs: expectedRole === "payment_proof" ? extraction.paymentProofs : []
+  };
+}
+
+export function createChutesStructuredExtractor(client: StructuredExtractionClient = new ChutesClient()): StructuredExtractor {
   return async (input) => {
     if (input.text.trim().length === 0) {
       return {
@@ -127,6 +145,11 @@ export function createChutesStructuredExtractor(client = new ChutesClient()): St
             "- parse_image_ocr: image/scanned proof after OCR text is available",
             "- manual_correction: unreadable, empty, or unsafe extraction",
             "",
+            "Fill only the array for the current document role:",
+            "- role invoice: fill invoices only; bankTransactions and paymentProofs must be [].",
+            "- role bank_statement: fill bankTransactions only; invoices and paymentProofs must be [].",
+            "- role payment_proof: fill paymentProofs only; invoices and bankTransactions must be [].",
+            "",
             "Return JSON with this exact shape:",
             '{"role":"invoice|bank_statement|payment_proof","selectedTool":"parse_pdf_text|parse_pdf_table|parse_csv_text|parse_spreadsheet|parse_image_ocr|manual_correction","confidence":0.0,"summary":"","invoices":[{"invoiceNumber":null,"customerName":null,"issueDate":null,"dueDate":null,"amountDue":{"value":null,"currency":null},"paymentReference":null}],"bankTransactions":[{"transactionDate":null,"valueDate":null,"description":null,"payerName":null,"amount":{"value":null,"currency":null},"reference":null}],"paymentProofs":[{"payerName":null,"creditorName":null,"paymentDate":null,"paidAmount":{"value":null,"currency":null},"reference":null,"paymentStatus":null,"providerOrBankName":null,"exchangeRate":null}],"warnings":[]}',
             "",
@@ -144,9 +167,12 @@ export function createChutesStructuredExtractor(client = new ChutesClient()): St
 
     const parsed = structuredDocumentExtractionSchema.parse(extractJsonObject(content));
     if (parsed.role !== input.role) {
-      return { ...parsed, role: input.role, warnings: [...parsed.warnings, `Model returned role ${parsed.role}; server expected ${input.role}.`] };
+      return keepOnlyExpectedRoleRecords(
+        { ...parsed, role: input.role, warnings: [...parsed.warnings, `Model returned role ${parsed.role}; server expected ${input.role}.`] },
+        input.role
+      );
     }
 
-    return parsed;
+    return keepOnlyExpectedRoleRecords(parsed, input.role);
   };
 }
