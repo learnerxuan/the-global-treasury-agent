@@ -1,144 +1,42 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { AppHeader } from "../src/components/dashboard/AppHeader";
+import { buildDisplayRow } from "../src/components/dashboard/adapter";
+import { MetricsStrip, type DashboardMetrics } from "../src/components/dashboard/MetricsStrip";
+import { ReconciliationDetailModal } from "../src/components/dashboard/ReconciliationDetailModal";
+import { ReconciliationResultsTable } from "../src/components/dashboard/ReconciliationResultsTable";
+import { UploadCard } from "../src/components/dashboard/UploadCard";
+import type {
+  DocumentRole,
+  ReconciliationDisplayRow,
+  ReconciliationRun,
+  RoleApiResult,
+  RunStatus,
+  UploadKey,
+  UploadStatus
+} from "../src/components/dashboard/types";
 
-type DocumentRole = "invoice" | "bank_statement" | "payment_proof";
-type UploadKey = "invoices" | "bankStatements" | "paymentProofs";
-type UploadStatus = "ready" | "pending" | "done" | "error";
-
-type MoneyExtraction = {
-  value: string | null;
-  currency: string | null;
-};
-
-type BankTransactionExtraction = {
-  transactionDate: string | null;
-  valueDate: string | null;
-  description: string | null;
-  payerName: string | null;
-  amount: MoneyExtraction;
-  amountReceived?: MoneyExtraction | null;
-  sourceAmount?: MoneyExtraction | null;
-  exchangeRateApplied?: string | null;
-  bankFeeDeducted?: MoneyExtraction | null;
-  feeCurrency?: string | null;
-  netCreditAmount?: MoneyExtraction | null;
-  reference?: string | null;
-  referenceNo?: string | null;
-  ttNo?: string | null;
-  remarks?: string | null;
-};
-
-type PaymentProofExtraction = {
-  payerName: string | null;
-  creditorName: string | null;
-  paymentDate: string | null;
-  paidAmount: MoneyExtraction;
-  reference: string | null;
-  paymentStatus: string | null;
-  providerOrBankName: string | null;
-  exchangeRate: string | null;
-  grossAmount?: MoneyExtraction | null;
-  feeAmount?: MoneyExtraction | null;
-  feeCurrency?: string | null;
-  netAmount?: MoneyExtraction | null;
-};
-
-type ExtractionResult = {
-  role: DocumentRole;
-  selectedTool: string;
-  confidence: number;
-  summary: string;
-  invoices: unknown[];
-  bankTransactions: BankTransactionExtraction[];
-  paymentProofs: PaymentProofExtraction[];
-  warnings: string[];
-};
-
-type RoleApiResult = {
-  ingestionId: string;
-  role: DocumentRole;
-  uploadedAt: string;
-  documents: Array<{ fileName: string; mimeType: string; readableTextLength: number; toolObservations: string[]; warnings: string[] }>;
-  extractions: ExtractionResult[];
-  codeTools: {
-    parsedInputBatch: unknown;
-    normalizedInputBatch: unknown;
-  };
-  storage: {
-    ingestionDir: string;
-    summaryPath: string;
-    waitingRecordPaths: string[];
-  };
-  mockReconciliationRun: {
-    runId: string;
-    status: string;
-    message: string;
-    nextStep: string;
-    path: string;
-  } | null;
-};
-
-type UploadCard = {
+type CardConfig = {
   key: UploadKey;
   role: DocumentRole;
-  endpoint: string;
-  eyebrow: string;
   title: string;
-  copy: string;
+  endpoint: string;
 };
 
-const uploadCards: UploadCard[] = [
-  {
-    key: "invoices",
-    role: "invoice",
-    endpoint: "/api/invoices/extractions",
-    eyebrow: "Expected payments",
-    title: "Invoices",
-    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
-  },
-  {
-    key: "bankStatements",
-    role: "bank_statement",
-    endpoint: "/api/bank-statements/extractions",
-    eyebrow: "Cash movement",
-    title: "Bank Statements",
-    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
-  },
-  {
-    key: "paymentProofs",
-    role: "payment_proof",
-    endpoint: "/api/payment-proofs/extractions",
-    eyebrow: "Customer evidence",
-    title: "Payment Proofs",
-    copy: "Upload one or many PDF, image, XLSX, CSV, or TXT files"
-  }
+const CARDS: CardConfig[] = [
+  { key: "invoices", role: "invoice", title: "Invoices", endpoint: "/api/invoices/extractions" },
+  { key: "bankStatements", role: "bank_statement", title: "Bank Statements", endpoint: "/api/bank-statements/extractions" },
+  { key: "paymentProofs", role: "payment_proof", title: "Payment Proofs", endpoint: "/api/payment-proofs/extractions" }
 ];
 
-const accept = ".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.txt,.csv,.xlsx,application/pdf,image/png,image/jpeg,image/webp,image/tiff,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const REVIEW_STATUSES: RunStatus[] = ["LIKELY_MATCHED", "NEEDS_REVIEW", "UNMATCHED"];
 
-function formatFile(file: File): string {
-  return `${file.name} - ${file.type || "unknown type"} - ${Math.ceil(file.size / 1024)} KB`;
-}
+type WaitingCounts = { invoices: number; bankTransactions: number; paymentProofs: number };
 
-function recordCount(result: ExtractionResult): number {
-  if (result.role === "invoice") return result.invoices.length;
-  if (result.role === "bank_statement") return result.bankTransactions.length;
-  return result.paymentProofs.length;
-}
+const EMPTY_WAITING: WaitingCounts = { invoices: 0, bankTransactions: 0, paymentProofs: 0 };
 
-function totalRecordCount(results: ExtractionResult[]): number {
-  return results.reduce((total, result) => total + recordCount(result), 0);
-}
-
-function statusCopy(status: UploadStatus): string {
-  if (status === "pending") return "Extracting";
-  if (status === "done") return "Stored";
-  if (status === "error") return "Failed";
-  return "Ready";
-}
-
-export default function Home() {
+export default function DashboardPage() {
   const [files, setFiles] = useState<Record<UploadKey, File[]>>({
     invoices: [],
     bankStatements: [],
@@ -154,18 +52,78 @@ export default function Home() {
     bankStatements: null,
     paymentProofs: null
   });
-  const [results, setResults] = useState<Partial<Record<UploadKey, RoleApiResult>>>({});
-  const latestResult = useMemo(() => {
-    const values = Object.values(results);
-    return values.length > 0 ? values[values.length - 1] : null;
-  }, [results]);
+  const [notices, setNotices] = useState<Record<UploadKey, string | null>>({
+    invoices: null,
+    bankStatements: null,
+    paymentProofs: null
+  });
 
-  async function submitUpload(event: FormEvent<HTMLFormElement>, card: UploadCard) {
+  // Persisted state, loaded from disk so a refresh keeps everything visible.
+  const [waiting, setWaiting] = useState<WaitingCounts>(EMPTY_WAITING);
+  const [runs, setRuns] = useState<ReconciliationRun[]>([]);
+  const [hydrating, setHydrating] = useState(true);
+
+  const [statusFilter, setStatusFilter] = useState<RunStatus | "ALL">("ALL");
+  const [openRow, setOpenRow] = useState<ReconciliationDisplayRow | null>(null);
+
+  const [clearing, setClearing] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [resetError, setResetError] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      const response = await fetch("/api/dashboard", { cache: "no-store" });
+      if (!response.ok) return;
+      const body = (await response.json()) as { waiting?: WaitingCounts; runs?: ReconciliationRun[] };
+      setWaiting(body.waiting ?? EMPTY_WAITING);
+      setRuns(body.runs ?? []);
+    } catch {
+      // Network/disk read failed — leave current state untouched.
+    } finally {
+      setHydrating(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const rows = useMemo<ReconciliationDisplayRow[]>(() => runs.map(buildDisplayRow), [runs]);
+
+  const metrics = useMemo<DashboardMetrics>(
+    () => ({
+      openInvoices: waiting.invoices,
+      bankTransactions: waiting.bankTransactions,
+      autoMatched: runs.filter((run) => run.status === "AUTO_MATCHED").length,
+      needsReview: runs.filter((run) => REVIEW_STATUSES.includes(run.status)).length
+    }),
+    [waiting, runs]
+  );
+
+  const latestRun = runs.length > 0 ? runs[0] ?? null : null;
+
+  const storedFor = (key: UploadKey): number => {
+    if (key === "invoices") return waiting.invoices;
+    if (key === "bankStatements") return waiting.bankTransactions;
+    return waiting.paymentProofs;
+  };
+
+  const tableState =
+    statuses.paymentProofs === "pending"
+      ? "loading"
+      : statuses.paymentProofs === "error"
+        ? "error"
+        : hydrating && runs.length === 0
+          ? "loading"
+          : "idle";
+
+  async function submitUpload(event: FormEvent<HTMLFormElement>, card: CardConfig) {
     event.preventDefault();
     const selected = files[card.key];
     if (selected.length === 0) {
       setStatuses((current) => ({ ...current, [card.key]: "error" }));
-      setErrors((current) => ({ ...current, [card.key]: "Upload at least one file." }));
+      setErrors((current) => ({ ...current, [card.key]: "Select at least one file." }));
       return;
     }
 
@@ -176,138 +134,138 @@ export default function Home() {
 
     setStatuses((current) => ({ ...current, [card.key]: "pending" }));
     setErrors((current) => ({ ...current, [card.key]: null }));
+    setNotices((current) => ({ ...current, [card.key]: null }));
 
-    const response = await fetch(card.endpoint, {
-      method: "POST",
-      body: formData
-    });
-    const body = await response.json();
-
-    if (!response.ok) {
+    try {
+      const response = await fetch(card.endpoint, { method: "POST", body: formData });
+      const body = await response.json();
+      if (!response.ok) {
+        setStatuses((current) => ({ ...current, [card.key]: "error" }));
+        setErrors((current) => ({ ...current, [card.key]: body.error ?? "Extraction failed." }));
+        return;
+      }
+      // Keep per-upload diagnostics for /debug, then re-hydrate persisted state.
+      try {
+        const previous = JSON.parse(sessionStorage.getItem("reconpilot:results") ?? "{}");
+        sessionStorage.setItem("reconpilot:results", JSON.stringify({ ...previous, [card.key]: body as RoleApiResult }));
+      } catch {
+        // sessionStorage optional
+      }
+      const summary = (body as RoleApiResult).extractionSummary;
+      if (summary && summary.failed > 0) {
+        setNotices((current) => ({
+          ...current,
+          [card.key]: `Extracted ${summary.extracted} of ${summary.total} file(s). ${summary.failed} failed (rate limit or unreadable) — re-upload the failed file(s) to retry.`
+        }));
+      }
+      setStatuses((current) => ({ ...current, [card.key]: "done" }));
+      setFiles((current) => ({ ...current, [card.key]: [] }));
+      await loadDashboard();
+    } catch (error) {
       setStatuses((current) => ({ ...current, [card.key]: "error" }));
-      setErrors((current) => ({ ...current, [card.key]: body.error ?? "Extraction failed." }));
-      return;
+      setErrors((current) => ({
+        ...current,
+        [card.key]: error instanceof Error ? error.message : "Network error during extraction."
+      }));
     }
+  }
 
-    setResults((current) => ({ ...current, [card.key]: body as RoleApiResult }));
-    setStatuses((current) => ({ ...current, [card.key]: "done" }));
+  async function clearDemoData() {
+    setClearing(true);
+    setResetMessage(null);
+    setResetError(false);
+    try {
+      const response = await fetch("/api/dev/clear-runtime", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        setResetError(true);
+        setResetMessage(body.error ?? "Unable to clear demo data.");
+        return;
+      }
+      setFiles({ invoices: [], bankStatements: [], paymentProofs: [] });
+      setStatuses({ invoices: "ready", bankStatements: "ready", paymentProofs: "ready" });
+      setErrors({ invoices: null, bankStatements: null, paymentProofs: null });
+      setNotices({ invoices: null, bankStatements: null, paymentProofs: null });
+      setWaiting(EMPTY_WAITING);
+      setRuns([]);
+      setOpenRow(null);
+      try {
+        sessionStorage.removeItem("reconpilot:results");
+      } catch {
+        // ignore
+      }
+      setResetMessage("Demo data cleared.");
+    } catch (error) {
+      setResetError(true);
+      setResetMessage(error instanceof Error ? error.message : "Unable to clear demo data.");
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function rescan() {
+    setRescanning(true);
+    setResetMessage(null);
+    setResetError(false);
+    try {
+      const response = await fetch("/api/reconciliation/rescan", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) {
+        setResetError(true);
+        setResetMessage(body.error ?? "Unable to re-run reconciliation.");
+        return;
+      }
+      await loadDashboard();
+      setResetMessage(`Re-ran reconciliation for ${body.count} proof(s).`);
+    } catch (error) {
+      setResetError(true);
+      setResetMessage(error instanceof Error ? error.message : "Unable to re-run reconciliation.");
+    } finally {
+      setRescanning(false);
+    }
   }
 
   return (
     <main className="shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">ReconPilot MVP</p>
-          <h1>Separate Extraction Storage</h1>
-          <p className="lede">
-            Upload invoices, bank statements, and payment proofs independently. Each file is extracted, parsed, normalized, and written to local waiting storage.
-          </p>
-        </div>
-        <div className="rule-card">
-          <span className="rule-label">Current slice</span>
-          <span>Upload to local storage only. Reconciliation matching will read these waiting records in the next step.</span>
-        </div>
-      </header>
+      <AppHeader
+        onClearDemo={clearDemoData}
+        clearing={clearing}
+        resetMessage={resetMessage}
+        resetError={resetError}
+        onRescan={rescan}
+        rescanning={rescanning}
+      />
 
-      <section className="upload-grid" aria-label="Separate uploads">
-        {uploadCards.map((card) => {
-          const result = results[card.key];
-          const status = statuses[card.key];
-          return (
-            <form className={`panel intake-panel ${card.role}`} key={card.key} onSubmit={(event) => submitUpload(event, card)}>
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">{card.eyebrow}</p>
-                  <h2>{card.title}</h2>
-                </div>
-                <span className={`status-pill ${status === "error" ? "review" : status === "pending" ? "pending" : status === "done" ? "ready" : "neutral"}`}>
-                  {statusCopy(status)}
-                </span>
-              </div>
-
-              <label className="drop-zone">
-                <span className="drop-icon" aria-hidden="true">+</span>
-                <span className="drop-title">Choose files</span>
-                <span className="drop-copy">{card.copy}</span>
-                <input
-                  type="file"
-                  multiple
-                  accept={accept}
-                  onChange={(event) => setFiles((current) => ({ ...current, [card.key]: Array.from(event.target.files ?? []) }))}
-                />
-              </label>
-
-              <div className="selected-file">
-                <strong>{files[card.key].length === 0 ? "No files selected" : `${files[card.key].length} selected`}</strong>
-                {files[card.key].length > 0 ? (
-                  <ul>
-                    {files[card.key].map((file) => (
-                      <li key={`${file.name}-${file.size}`}>{formatFile(file)}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-
-              <button className="primary-button" disabled={status === "pending"} type="submit">
-                Extract {card.title.toLowerCase()}
-              </button>
-
-              {errors[card.key] ? <div className="error-banner">{errors[card.key]}</div> : null}
-
-              {result ? (
-                <div className="result-body">
-                  <div className="summary-row">
-                    <strong>{result.documents.length} file(s)</strong>
-                    <span>{totalRecordCount(result.extractions)} waiting record(s)</span>
-                  </div>
-                  <dl className="mini-grid">
-                    <div>
-                      <dt>Ingestion</dt>
-                      <dd>{result.ingestionId}</dd>
-                    </div>
-                    <div>
-                      <dt>Stored records</dt>
-                      <dd>{result.storage.waitingRecordPaths.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Local folder</dt>
-                      <dd>{result.storage.ingestionDir}</dd>
-                    </div>
-                    {result.mockReconciliationRun ? (
-                      <>
-                        <div>
-                          <dt>Recon mock</dt>
-                          <dd>{result.mockReconciliationRun.status}</dd>
-                        </div>
-                        <div>
-                          <dt>Mock run file</dt>
-                          <dd>{result.mockReconciliationRun.path}</dd>
-                        </div>
-                      </>
-                    ) : null}
-                  </dl>
-                  {result.mockReconciliationRun ? (
-                    <p>{result.mockReconciliationRun.message}</p>
-                  ) : null}
-                </div>
-              ) : null}
-            </form>
-          );
-        })}
+      <section className="upload-strip" aria-label="Upload evidence">
+        {CARDS.map((card) => (
+          <UploadCard
+            key={card.key}
+            role={card.role}
+            title={card.title}
+            files={files[card.key]}
+            status={statuses[card.key]}
+            error={errors[card.key]}
+            notice={notices[card.key]}
+            storedWaiting={storedFor(card.key)}
+            latestRun={card.key === "paymentProofs" ? latestRun : null}
+            onFilesSelected={(selected) => setFiles((current) => ({ ...current, [card.key]: selected }))}
+            onSubmit={(event) => submitUpload(event, card)}
+          />
+        ))}
       </section>
 
-      <section className="details-grid" aria-label="Latest stored result">
-        <article className="panel json-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Latest Upload</p>
-              <h2>Stored Extraction JSON</h2>
-            </div>
-            <span className="status-pill neutral">JSON</span>
-          </div>
-          <pre tabIndex={0}>{JSON.stringify(latestResult ?? {}, null, 2)}</pre>
-        </article>
-      </section>
+      <MetricsStrip metrics={metrics} />
+
+      <ReconciliationResultsTable
+        rows={rows}
+        state={tableState}
+        errorMessage={errors.paymentProofs}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        onOpenRow={setOpenRow}
+      />
+
+      {openRow ? <ReconciliationDetailModal row={openRow} onClose={() => setOpenRow(null)} /> : null}
     </main>
   );
 }

@@ -8,6 +8,7 @@ import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocu
 import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
 import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
 import { parseBankStatements, parseBankStatementText } from "../../lib/recon/parsers/bank-statements";
+import { runReconciliationForWaitingProof, type ProofReconciliationRun } from "../reconciliation/waiting-reconciliation";
 import type {
   BankStatementTransaction,
   CurrencyCode,
@@ -106,18 +107,35 @@ export type MockReconciliationRun = {
   path: string;
 };
 
+export type ExtractionOutcome = {
+  fileName: string;
+  status: "extracted" | "failed";
+  records: number;
+  error: string | null;
+};
+
+export type ExtractionSummary = {
+  total: number;
+  extracted: number;
+  failed: number;
+  outcomes: ExtractionOutcome[];
+};
+
 export type RoleExtractionResponse = {
   ingestionId: string;
   role: DocumentRole;
   uploadedAt: string;
   documents: StoredDocument[];
   extractions: StructuredDocumentExtraction[];
+  extractionSummary: ExtractionSummary;
   codeTools: {
     parsedInputBatch: InputBatch;
     normalizedInputBatch: NormalizedInputBatch;
   };
   storage: LocalExtractionStorage;
   mockReconciliationRun: MockReconciliationRun | null;
+  reconciliationRuns: ProofReconciliationRun[];
+  debugResponsePath: string;
 };
 
 function resolveStorageDir(storageDir?: string): string {
@@ -835,6 +853,44 @@ function extractedRoleFolder(role: DocumentRole): string {
   return "payment_proofs";
 }
 
+function recordCountForRole(role: DocumentRole, extraction: StructuredDocumentExtraction): number {
+  if (role === "invoice") return extraction.invoices.length;
+  if (role === "bank_statement") return extraction.bankTransactions.length;
+  return extraction.paymentProofs.length;
+}
+
+// A file is treated as failed when the extractor could not produce a usable
+// result — i.e. it fell back to manual_correction with zero confidence (LLM
+// error / rate limit, or unreadable text). The first warning carries the reason.
+function isFailedExtraction(extraction: StructuredDocumentExtraction): boolean {
+  return extraction.selectedTool === "manual_correction" && extraction.confidence === 0;
+}
+
+function buildExtractionSummary(
+  role: DocumentRole,
+  storedDocuments: StoredDocumentContent[],
+  extractions: StructuredDocumentExtraction[]
+): ExtractionSummary {
+  const outcomes: ExtractionOutcome[] = storedDocuments.map((document, index) => {
+    const extraction = extractions[index];
+    const failed = !extraction || isFailedExtraction(extraction);
+    return {
+      fileName: document.stored.fileName,
+      status: failed ? "failed" : "extracted",
+      records: extraction ? recordCountForRole(role, extraction) : 0,
+      error: failed ? extraction?.warnings[0] ?? "Extraction failed." : null
+    };
+  });
+
+  const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
+  return {
+    total: outcomes.length,
+    extracted: outcomes.length - failed,
+    failed,
+    outcomes
+  };
+}
+
 function waitingRecordsForRole(role: DocumentRole, normalizedInputBatch: NormalizedInputBatch): Array<{ recordId: string; record: unknown }> {
   if (role === "invoice") {
     return normalizedInputBatch.expectedPayments.map((record) => ({ recordId: record.expectedPaymentId, record }));
@@ -887,18 +943,22 @@ async function persistRoleExtraction(input: {
   );
 
   const documents = input.storedDocuments.map((document) => toPublicJson(document.stored));
-  const jobs = documents.map((document, index) => ({
-    jobId: `job_${document.documentId}`,
-    ingestionId: input.ingestionId,
-    documentId: document.documentId,
-    role: input.role,
-    status: "completed",
-    selectedTool: input.extractions[index]?.selectedTool ?? null,
-    confidence: input.extractions[index]?.confidence ?? null,
-    uploadedAt: input.uploadedAt,
-    completedAt: new Date().toISOString(),
-    error: null
-  }));
+  const jobs = documents.map((document, index) => {
+    const extraction = input.extractions[index];
+    const failed = !extraction || isFailedExtraction(extraction);
+    return {
+      jobId: `job_${document.documentId}`,
+      ingestionId: input.ingestionId,
+      documentId: document.documentId,
+      role: input.role,
+      status: failed ? "failed" : "completed",
+      selectedTool: extraction?.selectedTool ?? null,
+      confidence: extraction?.confidence ?? null,
+      uploadedAt: input.uploadedAt,
+      completedAt: new Date().toISOString(),
+      error: failed ? extraction?.warnings[0] ?? "Extraction failed." : null
+    };
+  });
 
   const waitingRecordPaths: string[] = [];
   for (const { recordId, record } of waitingRecordsForRole(input.role, input.normalizedInputBatch)) {
@@ -941,28 +1001,6 @@ async function persistRoleExtraction(input: {
   };
 }
 
-async function createMockReconciliationRun(input: {
-  extractedDir: string;
-  ingestionId: string;
-  waitingRecordPaths: string[];
-}): Promise<MockReconciliationRun> {
-  const runId = `mock_recon_${randomUUID()}`;
-  const path = join(input.extractedDir, "reconciliation_runs", "mock", `${runId}.json`);
-  const run: MockReconciliationRun = {
-    runId,
-    status: "queued_mock",
-    trigger: "payment_proof_uploaded",
-    createdAt: new Date().toISOString(),
-    paymentProofRecordPaths: input.waitingRecordPaths.map(toProjectRelativePath),
-    message: "Payment proof extraction was stored. Reconciliation would now search waiting invoices and bank transactions.",
-    nextStep: "Implement real matching to classify AUTO_MATCHED, LIKELY_MATCHED, NEEDS_REVIEW, or UNMATCHED.",
-    path: toProjectRelativePath(path)
-  };
-
-  await writeJson(path, run);
-  return run;
-}
-
 export async function extractRoleDocuments(
   role: DocumentRole,
   uploads: UploadedDocument[],
@@ -989,23 +1027,39 @@ export async function extractRoleDocuments(
     parsedInputBatch,
     normalizedInputBatch
   });
-  const mockReconciliationRun = role === "payment_proof"
-    ? await createMockReconciliationRun({ extractedDir, ingestionId, waitingRecordPaths: storage.waitingRecordPaths })
-    : null;
+  // Reconcile proofs sequentially. Each AUTO_MATCHED run moves invoice/bank
+  // records from waiting -> completed, so running them one at a time ensures
+  // every match commits its file moves before the next proof reads the waiting
+  // store. Running concurrently could race on the same invoice/bank record.
+  const reconciliationRuns: ProofReconciliationRun[] = [];
+  if (role === "payment_proof") {
+    for (const path of storage.waitingRecordPaths) {
+      reconciliationRuns.push(
+        await runReconciliationForWaitingProof(path, { extractedDir, trigger: "payment_proof_uploaded" })
+      );
+    }
+  }
+  const debugResponsePath = join(extractedDir, "debug_responses", `${ingestionId}_response.json`);
 
-  return {
+  const response: RoleExtractionResponse = {
     ingestionId,
     role,
     uploadedAt,
     documents: toPublicJson(documents[role]),
     extractions,
+    extractionSummary: buildExtractionSummary(role, storedDocuments, extractions),
     codeTools: {
       parsedInputBatch: toPublicJson(parsedInputBatch),
       normalizedInputBatch: toPublicJson(normalizedInputBatch)
     },
     storage,
-    mockReconciliationRun
+    mockReconciliationRun: null,
+    reconciliationRuns: toPublicJson(reconciliationRuns),
+    debugResponsePath: toProjectRelativePath(debugResponsePath)
   };
+
+  await writeJson(debugResponsePath, response);
+  return response;
 }
 
 export async function extractReconciliationDocuments(

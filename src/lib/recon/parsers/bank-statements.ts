@@ -28,7 +28,7 @@ const COLUMN_ALIASES: Record<BankFieldKey, string[]> = {
   credit: ["credit", "credit amount", "credits", "deposit"],
   debit: ["debit", "debit amount", "debits", "withdrawal"],
   currency: ["currency", "ccy"],
-  debtorName: ["payer", "debtor", "sender", "debtor name", "payer name"],
+  debtorName: ["payer", "debtor", "sender", "counterparty", "counterparty name", "debtor name", "payer name"],
   creditorName: ["payee", "creditor", "receiver", "creditor name", "payee name"],
   bankRef: ["bank ref", "bank reference", "reference", "ref"],
 };

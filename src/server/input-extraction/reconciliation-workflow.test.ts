@@ -149,9 +149,17 @@ describe("extractReconciliationDocuments", () => {
     expect(result.extractions[1]?.selectedTool).toBe("manual_correction");
     expect(result.extractions[1]?.warnings[0]).toContain("provider 429");
     expect(result.storage.waitingRecordPaths).toHaveLength(1);
+
+    // The failure must be visible in the summary instead of silently vanishing.
+    expect(result.extractionSummary.total).toBe(2);
+    expect(result.extractionSummary.extracted).toBe(1);
+    expect(result.extractionSummary.failed).toBe(1);
+    const failedOutcome = result.extractionSummary.outcomes.find((outcome) => outcome.status === "failed");
+    expect(failedOutcome?.fileName).toContain("bad-invoice");
+    expect(failedOutcome?.error).toContain("provider 429");
   });
 
-  it("creates a mock reconciliation run when payment proofs are stored", async () => {
+  it("runs real proof-triggered reconciliation when payment proofs are stored", async () => {
     const storageDir = await mkdtemp(join(tmpdir(), "reconpilot-uploads-"));
     const extractedDir = await mkdtemp(join(tmpdir(), "reconpilot-extracted-"));
     const extractor: StructuredExtractor = async (input) => ({
@@ -183,9 +191,12 @@ describe("extractReconciliationDocuments", () => {
     );
 
     expect(result.storage.waitingRecordPaths).toHaveLength(1);
-    expect(result.mockReconciliationRun?.status).toBe("queued_mock");
-    expect(result.mockReconciliationRun?.message).toContain("Reconciliation would now search");
-    await expect(readFile(result.mockReconciliationRun!.path, "utf8")).resolves.toContain("payment_proof_uploaded");
+    expect(result.mockReconciliationRun).toBeNull();
+    expect(result.reconciliationRuns).toHaveLength(1);
+    expect(result.reconciliationRuns[0]?.trigger).toBe("payment_proof_uploaded");
+    expect(result.reconciliationRuns[0]?.status).toBe("NEEDS_REVIEW");
+    expect(result.reconciliationRuns[0]?.summary).toContain("no waiting bank credit");
+    await expect(readFile(result.reconciliationRuns[0]!.outputPaths.runPath, "utf8")).resolves.toContain("payment_proof_uploaded");
   });
 
   it("parses bank statement CSV uploads with code before calling the extractor", async () => {
