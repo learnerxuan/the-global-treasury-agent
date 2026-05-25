@@ -806,6 +806,10 @@ function calibrateExtractionConfidence(extraction: StructuredDocumentExtraction)
   };
 }
 
+function extractionDelayMs(): number {
+  return process.env.NODE_ENV === "test" || process.env.VITEST ? 0 : 1500;
+}
+
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function extractStoredDocuments(
@@ -829,7 +833,8 @@ async function extractStoredDocuments(
         toolObservations: [...document.stored.toolObservations, ...document.stored.warnings]
       });
       extractions.push(calibrateExtractionConfidence(extraction));
-      await sleep(6000);
+      const delay = extractionDelayMs();
+      if (delay > 0) await sleep(delay);
     } catch (error) {
       extractions.push({
         role: document.stored.role,

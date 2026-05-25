@@ -36,7 +36,7 @@ const COLUMN_ALIASES: Record<BankFieldKey, string[]> = {
 // ─── Header Normalisation ─────────────────────────────────────────────────────
 
 function normalizeHeader(h: string): string {
-  return h.toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return h.toLowerCase().replace(/\([^)]+\)/g, "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
 }
 
 // ─── Format Detection ─────────────────────────────────────────────────────────
