@@ -16,6 +16,9 @@ const FORMAT_A_NEGATIVE_CSV = `date,description,amount,payer
 2026-05-20,Inward remittance INV-1001,42.50,ACME PTE LTD
 2026-05-22,Bank charge,-5.00,`;
 
+const COUNTERPARTY_CSV = `date,description,amount,direction,counterparty
+2026-05-21,Inward remittance ACME PTE LTD INV-1001,42500.00,CR,Acme Pte Ltd`;
+
 // ─── Format B fixtures (split credit / debit columns) ─────────────────────────
 
 const FORMAT_B_CSV = `date,description,credit,debit,payer
@@ -127,6 +130,13 @@ describe("parseBankStatements — Format A", () => {
     expect(records[0]!.debtorName).toBe("ACME PTE LTD");
     expect(records[0]!.debtorNormalizedName).toBe("ACME");
     expect(records[1]!.debtorNormalizedName).toBe("BETA");
+  });
+
+  it("maps Counterparty header to debtor name for inward remittance rows", () => {
+    const { records, warnings } = parseBankStatements(COUNTERPARTY_CSV, "csv", "bank_counterparty", "MYR_MAIN");
+    expect(records[0]!.debtorName).toBe("Acme Pte Ltd");
+    expect(records[0]!.debtorNormalizedName).toBe("ACME");
+    expect(warnings.some((warning) => warning.field === "counterparty")).toBe(false);
   });
 
   it("sets sourceFileId and sourceRowNumber", () => {

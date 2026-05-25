@@ -8,6 +8,10 @@ export type ChutesClientOptions = {
   baseUrl?: string;
   model?: string;
   provider?: "chutes" | "nvidia";
+  /** Total attempts per chat call, including the first. Defaults to 4. */
+  maxAttempts?: number;
+  /** Base delay (ms) for exponential backoff between retries. Defaults to 600. */
+  retryBaseDelayMs?: number;
 };
 
 export type ChutesChatOptions = {
@@ -16,8 +20,16 @@ export type ChutesChatOptions = {
   maxTokens?: number;
 };
 
+// Transient HTTP statuses worth retrying. 429 = rate limited (the common one for
+// shared keys when extracting many files); 5xx = provider hiccups.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
 function readLocalEnvValue(name: string): string | undefined {
   return process.env[name];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class ChutesClient {
@@ -25,6 +37,8 @@ export class ChutesClient {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly provider: "chutes" | "nvidia";
+  private readonly maxAttempts: number;
+  private readonly retryBaseDelayMs: number;
 
   constructor(options: ChutesClientOptions = {}) {
     const provider =
@@ -55,6 +69,21 @@ export class ChutesClient {
       (provider === "nvidia"
         ? readLocalEnvValue("NVIDIA_MODEL") ?? "meta/llama-3.3-70b-instruct"
         : readLocalEnvValue("CHUTES_MODEL") ?? "default:latency");
+
+    const envAttempts = Number(readLocalEnvValue("LLM_MAX_ATTEMPTS"));
+    this.maxAttempts = Math.max(1, options.maxAttempts ?? (Number.isFinite(envAttempts) && envAttempts > 0 ? envAttempts : 4));
+    this.retryBaseDelayMs = Math.max(0, options.retryBaseDelayMs ?? 600);
+  }
+
+  private backoffMs(attempt: number, retryAfterHeader: string | null): number {
+    // Honor a provider-supplied Retry-After (seconds) when present.
+    if (retryAfterHeader) {
+      const seconds = Number(retryAfterHeader);
+      if (Number.isFinite(seconds) && seconds > 0) return Math.min(seconds * 1000, 15000);
+    }
+    const exponential = this.retryBaseDelayMs * 2 ** (attempt - 1);
+    const jitter = Math.random() * this.retryBaseDelayMs;
+    return Math.min(exponential + jitter, 15000);
   }
 
   async chat(options: ChutesChatOptions): Promise<string> {
@@ -63,33 +92,59 @@ export class ChutesClient {
         ? { Authorization: `Bearer ${this.apiKey}` }
         : { "X-API-Key": this.apiKey };
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeader
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: options.messages,
-        temperature: options.temperature ?? 0,
-        max_tokens: options.maxTokens ?? 1600
-      })
+    const requestBody = JSON.stringify({
+      model: this.model,
+      messages: options.messages,
+      temperature: options.temperature ?? 0,
+      max_tokens: options.maxTokens ?? 1600
     });
 
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`${this.provider} request failed with ${response.status}: ${text.slice(0, 500)}`);
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeader },
+          body: requestBody
+        });
+      } catch (networkError) {
+        // Network/DNS/connection error — retry.
+        lastError = new Error(
+          `${this.provider} request failed (network): ${networkError instanceof Error ? networkError.message : "unknown error"}`
+        );
+        if (attempt < this.maxAttempts) {
+          await sleep(this.backoffMs(attempt, null));
+          continue;
+        }
+        throw lastError;
+      }
+
+      const text = await response.text();
+
+      if (!response.ok) {
+        if (RETRYABLE_STATUS.has(response.status) && attempt < this.maxAttempts) {
+          lastError = new Error(`${this.provider} request failed with ${response.status}: ${text.slice(0, 500)}`);
+          await sleep(this.backoffMs(attempt, response.headers.get("retry-after")));
+          continue;
+        }
+        // Non-retryable status (e.g. 400/401/403) or final attempt — fail loudly.
+        throw new Error(`${this.provider} request failed with ${response.status}: ${text.slice(0, 500)}`);
+      }
+
+      const parsed = JSON.parse(text) as {
+        choices?: Array<{ message?: { content?: unknown } }>;
+      };
+      const content = parsed.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || content.trim().length === 0) {
+        throw new Error("Chutes response did not include message content.");
+      }
+
+      return content.trim();
     }
 
-    const parsed = JSON.parse(text) as {
-      choices?: Array<{ message?: { content?: unknown } }>;
-    };
-    const content = parsed.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || content.trim().length === 0) {
-      throw new Error("Chutes response did not include message content.");
-    }
-
-    return content.trim();
+    // Loop exhausted retries on a transient failure.
+    throw lastError ?? new Error(`${this.provider} request failed after ${this.maxAttempts} attempts.`);
   }
 }
