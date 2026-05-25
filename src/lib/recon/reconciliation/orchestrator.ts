@@ -75,11 +75,11 @@ function severityFor(classification: ClassificationResult): ReviewSeverity {
 function buildReviewQuestion(classification: ClassificationResult, selected: ScoredCandidate | null): string {
   const flags = classification.hardReviewFlags;
   if (flags.includes("COMPETING_CANDIDATES_CLOSE")) {
-    return "This bank credit could settle more than one invoice. Which invoice should receive the payment?";
+    return "This bank settlement row could settle more than one invoice. Which invoice should receive the payment?";
   }
   if (flags.includes("RESIDUAL_ABOVE_THRESHOLD") && selected?.residual.residualAmount) {
     const amount = selected.feeHypothesis.amount ?? selected.residual.residualAmount;
-    return `This bank credit is ${amount} ${selected.residual.bestScenario?.expectedLocalAmount.currency ?? ""} away from the best FX explanation. Was an intermediary fee or FX spread applied?`.trim();
+    return `This bank settlement row is ${amount} ${selected.residual.bestScenario?.expectedLocalAmount.currency ?? ""} away from the best FX explanation. Was an intermediary fee or FX spread applied?`.trim();
   }
   if (flags.includes("PROOF_NOT_SETTLED")) {
     return "The payment proof is not marked as settled/completed. Do you have a completed-payment proof before we close this invoice?";
@@ -108,7 +108,7 @@ function competingOptions(scoredCandidates: ScoredCandidate[]): HumanReviewOptio
 
 function buildExplanation(status: ReconciliationStatus, selected: ScoredCandidate | null): string {
   if (!selected) {
-    return "No plausible payment proof or expected payment was found for this bank credit.";
+    return "No plausible payment proof or expected payment was found for this bank settlement row.";
   }
   const fx = selected.residual.bestScenario;
   const pct = selected.residual.residualPercent;
@@ -162,9 +162,9 @@ export function runReconciliationOrchestrator(
     };
   }
 
-  const credits = batch.bankTransactions.filter((tx) => tx.creditDebitIndicator === "CRDT");
+  const settlementRows = batch.bankTransactions.filter((tx) => tx.amount.value !== "0" && tx.amount.value !== "0.00");
 
-  for (const bankTx of credits) {
+  for (const bankTx of settlementRows) {
     const caseId = `CASE-${bankTx.internalTxId}`;
     const candidates = candidateSet.data.candidatesByBankTx[bankTx.internalTxId] ?? [];
 
@@ -172,7 +172,7 @@ export function runReconciliationOrchestrator(
       actor: "Agent 2",
       eventType: "STATE_CHANGED",
       action: "case created",
-      reasoning: `Reconciling bank credit ${bankTx.internalTxId} (${candidates.length} candidate(s)).`,
+      reasoning: `Reconciling bank settlement row ${bankTx.internalTxId} (${candidates.length} candidate(s)).`,
       relatedIds: { caseId, bankTransactionId: bankTx.internalTxId }
     });
 
@@ -297,7 +297,7 @@ export function runReconciliationOrchestrator(
         status,
         type: "MOCK_EMAIL_DRAFT",
         evidenceRefs: evidence,
-        summary: "Draft follow-up email for an unresolved bank credit."
+        summary: "Draft follow-up email for an unresolved bank settlement row."
       });
       if (email.ok) artifactRequests.push(email.data);
     }

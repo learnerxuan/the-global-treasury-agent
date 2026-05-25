@@ -195,7 +195,7 @@ describe("extractReconciliationDocuments", () => {
     expect(result.reconciliationRuns).toHaveLength(1);
     expect(result.reconciliationRuns[0]?.trigger).toBe("payment_proof_uploaded");
     expect(result.reconciliationRuns[0]?.status).toBe("NEEDS_REVIEW");
-    expect(result.reconciliationRuns[0]?.summary).toContain("no waiting bank credit");
+    expect(result.reconciliationRuns[0]?.summary).toContain("no waiting bank statement row");
     await expect(readFile(result.reconciliationRuns[0]!.outputPaths.runPath, "utf8")).resolves.toContain("payment_proof_uploaded");
   });
 

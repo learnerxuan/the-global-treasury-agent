@@ -102,6 +102,26 @@ export function calculateFxScenarios(input: {
       })
     );
   }
+  if (
+    !bankSource &&
+    bankTransaction.creditDebitIndicator === "DBIT" &&
+    foreignCurrency !== targetCurrency &&
+    Number(foreignAmount.value) !== 0 &&
+    candidate.signals.some((signal) => signal.code === "EXACT_REFERENCE_MATCH")
+  ) {
+    scenarios.push(
+      finalize({
+        scenarioId: `${candidate.candidateId}-FX-bank_statement_implied`,
+        label: BASIS_LABEL.bank_statement,
+        basis: "bank_statement",
+        foreignAmount,
+        rate: divideToRate(bankAmount.value, foreignAmount.value),
+        rateDate: bankTransaction.bookingDate,
+        rateSource: "bank",
+        isFallback: false
+      })
+    );
+  }
 
   // 3-5. Date-based reference scenarios.
   const datedBases: { basis: FxScenarioBasis; date: string | null | undefined }[] = [

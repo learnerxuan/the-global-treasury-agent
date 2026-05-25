@@ -71,7 +71,7 @@ function nameMatch(a: string | null, b: string | null): boolean {
   return a !== null && b !== null && a === b;
 }
 
-// Signals tying a bank credit to a payment proof.
+// Signals tying a bank settlement row to a payment proof.
 function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPaymentProofRecord): CandidateSignal[] {
   const signals: CandidateSignal[] = [];
   const refs = bankReferenceSet(bank);
@@ -85,7 +85,7 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
   // (e.g. "REF20260521001") — its digit runs collide with invoice numbers and
   // produce false links. Bank↔proof relies on exact reference or amount instead.
 
-  // The bank credit is local currency; cross-border proofs are foreign currency.
+  // The bank settlement is local currency; cross-border proofs are foreign currency.
   // Match against bank.amount (local) OR bank.sourceAmount (the foreign amount the
   // bank itself recorded for the incoming remittance).
   const proofAmounts = proofComparableAmounts(proof);
@@ -108,7 +108,7 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
   return signals;
 }
 
-// Signals tying an expected payment to the bank credit and/or the proof.
+// Signals tying an expected payment to the bank settlement row and/or the proof.
 function expectedLinkSignals(
   bank: BankStatementTransaction,
   proof: NormalizedPaymentProofRecord | null,
@@ -154,6 +154,28 @@ function meetsThreshold(signals: CandidateSignal[]): boolean {
   return strong >= 1 || medium >= 2;
 }
 
+function expectedBridgeQualifies(
+  bank: BankStatementTransaction,
+  proof: NormalizedPaymentProofRecord,
+  expected: ExpectedPaymentRecord,
+  bpSignals: CandidateSignal[]
+): boolean {
+  const refs = bankReferenceSet(bank);
+  const text = bankTextNormalized(bank);
+  const expectedRef = expected.paymentReference.normalized;
+  const proofRef = proof.financialPayload.reference.normalized;
+  const expectedLinkedToBank = referenceLinked(refs, text, expectedRef);
+  const expectedLinkedToProof = expectedRef !== null && proofRef !== null && (expectedRef === proofRef || partialReferenceMatch(expectedRef, proofRef));
+  const expectedAmountMatchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expected.amountDue));
+  const proofBankIsPlausible = meetsThreshold(bpSignals);
+
+  if (expectedLinkedToBank) {
+    return expectedLinkedToProof || expectedAmountMatchesProof || proofBankIsPlausible;
+  }
+
+  return expectedLinkedToProof && proofBankIsPlausible;
+}
+
 function makeCandidate(
   candidateId: string,
   bank: BankStatementTransaction,
@@ -181,37 +203,32 @@ export function generateBankAnchoredCandidates(input: {
   const candidatesByBankTx: Record<string, MatchCandidate[]> = {};
   const unmatchedBankTxIds: string[] = [];
 
-  const credits = batch.bankTransactions.filter((tx) => tx.creditDebitIndicator === "CRDT");
+  const settlementRows = batch.bankTransactions.filter((tx) => compareMoney(tx.amount.value, "0") !== 0);
   const proofs = batch.paymentProofs.filter((p) => !REJECTED_STATUSES.has(p.financialPayload.paymentStatus));
 
   let candidateSeq = 0;
 
-  for (const bank of credits) {
+  for (const bank of settlementRows) {
     const perBank: MatchCandidate[] = [];
 
     for (const proof of proofs) {
       const bpSignals = bankProofSignals(bank, proof);
-      if (!meetsThreshold(bpSignals)) continue;
 
       // An invoice attaches only on a *linking* signal (reference or amount).
       // A shared customer name corroborates the score but must never, on its own,
       // pair a proof with one of several same-customer invoices.
-      const linkedExpecteds = batch.expectedPayments.filter((expected) =>
-        expectedLinkSignals(bank, proof, expected).some(
-          (signal) =>
-            signal.code === "EXACT_REFERENCE_MATCH" ||
-            signal.code === "PARTIAL_REFERENCE_MATCH" ||
-            signal.code === "AMOUNT_MATCHES_EXPECTED"
-        )
-      );
+      const linkedExpecteds = batch.expectedPayments
+        .map((expected) => ({ expected, signals: expectedLinkSignals(bank, proof, expected) }))
+        .filter(({ expected }) => expectedBridgeQualifies(bank, proof, expected, bpSignals));
 
       if (linkedExpecteds.length > 0) {
-        for (const expected of linkedExpecteds) {
+        for (const { expected, signals: expectedSignals } of linkedExpecteds) {
+          const signals = [...bpSignals, ...expectedSignals];
+          if (!meetsThreshold(signals)) continue;
           candidateSeq += 1;
-          const signals = [...bpSignals, ...expectedLinkSignals(bank, proof, expected)];
           perBank.push(makeCandidate(`CAND-${String(candidateSeq).padStart(3, "0")}`, bank, proof, expected, signals));
         }
-      } else {
+      } else if (meetsThreshold(bpSignals)) {
         candidateSeq += 1;
         perBank.push(makeCandidate(`CAND-${String(candidateSeq).padStart(3, "0")}`, bank, proof, null, bpSignals));
       }
@@ -229,6 +246,6 @@ export function generateBankAnchoredCandidates(input: {
     ok: true,
     toolName: TOOL_NAME,
     data: { candidatesByBankTx, unmatchedBankTxIds },
-    summary: `Generated ${total} candidate(s) across ${credits.length} bank credit(s); ${unmatchedBankTxIds.length} unmatched.`
+        summary: `Generated ${total} candidate(s) across ${settlementRows.length} bank settlement row(s); ${unmatchedBankTxIds.length} unmatched.`
   };
 }

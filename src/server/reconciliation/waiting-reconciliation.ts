@@ -206,17 +206,17 @@ function statusFromSelectedResult(
   batch: NormalizedInputBatch
 ): ProofReconciliationRunStatus {
   if (selected) return selected.status;
-  if (batch.bankTransactions.filter((tx) => tx.creditDebitIndicator === "CRDT").length === 0) return "NEEDS_REVIEW";
+  if (batch.bankTransactions.length === 0) return "NEEDS_REVIEW";
   return "UNMATCHED";
 }
 
 function buildProofLevelSummary(status: ProofReconciliationRunStatus, selected: ReconciliationResult | null): string {
   if (selected) return selected.explanation;
   if (status === "NEEDS_REVIEW") {
-    return "Payment proof was extracted and stored, but no waiting bank credit is available yet. Upload or import the latest bank statement, then retry reconciliation.";
+    return "Payment proof was extracted and stored, but no waiting bank statement row is available yet. Upload or import the latest bank statement, then retry reconciliation.";
   }
   if (status === "UNMATCHED") {
-    return "Payment proof was extracted and stored, but no plausible waiting invoice and bank credit combination matched it.";
+    return "Payment proof was extracted and stored, but no plausible waiting invoice and bank statement row combination matched it.";
   }
   return "No payment proof record was available for reconciliation.";
 }

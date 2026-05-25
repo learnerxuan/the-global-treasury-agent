@@ -51,14 +51,51 @@ describe("generateBankAnchoredCandidates", () => {
     expect(result.data.candidatesByBankTx["txn_orphan"]).toBeUndefined();
   });
 
-  it("skips bank debits entirely", () => {
+  it("matches bank debits for outgoing treasury payments", () => {
     const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
-    const debit = { ...baseBank, internalTxId: "txn_debit", creditDebitIndicator: "DBIT" as const };
+    const debit = {
+      ...baseBank,
+      internalTxId: "txn_debit",
+      creditDebitIndicator: "DBIT" as const,
+      normalizedReference: "INV1001",
+      remittanceInformation: { raw: "Outgoing payment INV-1001", structured: { invoiceNumber: "INV-1001" } }
+    };
     const batch: NormalizedInputBatch = { ...cleanNormalizedBatch, bankTransactions: [debit] };
 
     const result = generateBankAnchoredCandidates({ batch, policy: DEFAULT_POLICY });
     if (!result.ok) return;
-    expect(result.data.candidatesByBankTx["txn_debit"]).toBeUndefined();
+    expect(result.data.candidatesByBankTx["txn_debit"]?.[0]?.expectedPaymentId).toBe("exp_file_001_row002");
     expect(result.data.unmatchedBankTxIds).not.toContain("txn_debit");
+  });
+
+  it("uses the invoice as a bridge when proof reference is a provider transaction id", () => {
+    const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
+    const baseProof = cleanNormalizedBatch.paymentProofs[0]!;
+    const expected = cleanNormalizedBatch.expectedPayments[0]!;
+    const bank = {
+      ...baseBank,
+      internalTxId: "txn_bridge",
+      creditDebitIndicator: "DBIT" as const,
+      normalizedReference: expected.paymentReference.normalized,
+      remittanceInformation: { raw: `Outgoing payment ${expected.invoiceNumber}`, structured: { invoiceNumber: expected.invoiceNumber } }
+    };
+    const proof = {
+      ...baseProof,
+      proofId: "proof_bridge",
+      financialPayload: {
+        ...baseProof.financialPayload,
+        reference: { raw: "TRX-513901", normalized: "TRX513901" },
+        paidAmount: expected.amountDue,
+        sourceAmount: expected.amountDue
+      }
+    };
+    const batch: NormalizedInputBatch = { ...cleanNormalizedBatch, bankTransactions: [bank], paymentProofs: [proof] };
+
+    const result = generateBankAnchoredCandidates({ batch, policy: DEFAULT_POLICY });
+    if (!result.ok) return;
+    expect(result.data.candidatesByBankTx.txn_bridge?.[0]).toMatchObject({
+      proofId: "proof_bridge",
+      expectedPaymentId: expected.expectedPaymentId
+    });
   });
 });
