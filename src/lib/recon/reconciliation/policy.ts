@@ -5,12 +5,33 @@ import type { CurrencyCode } from "../types";
 // hidden in magic numbers scattered across the codebase.
 
 export type ReconciliationPolicy = {
+  version: string;
+  fx: {
+    spreadMargins: number[];
+    providerMode: "fixture" | "optional_live";
+  };
   // Residual bands, as fractions (0.005 == 0.5%).
   residual: {
     withinTolerance: number; // <= this => strong amount match
     smallVariance: number; // <= this => plausible FX spread / small fee
     significantVariance: number; // <= this => risky discrepancy
     hardReviewThreshold: number; // > this => hard review override
+    absoluteCaps: Partial<Record<CurrencyCode, string>>;
+  };
+  fees: {
+    flatFeeHypotheses: string[];
+  };
+  reference: {
+    ignoredYears: string[];
+    genericTokens: string[];
+  };
+  autoMatch: {
+    allowBalancedPartialReference: boolean;
+    requireStrongAmountAndPartyForPartialReference: boolean;
+  };
+  batch: {
+    maxInvoicesPerGroup: number;
+    maxInvoicesPerCandidate: number;
   };
   // Scoring maxima per signal.
   score: {
@@ -49,11 +70,37 @@ export type ReconciliationPolicy = {
 };
 
 export const DEFAULT_POLICY: ReconciliationPolicy = {
+  version: "enterprise-v1-local",
+  fx: {
+    spreadMargins: [0, 0.01, 0.015, 0.02],
+    providerMode: "fixture"
+  },
   residual: {
     withinTolerance: 0.005,
     smallVariance: 0.02,
     significantVariance: 0.05,
-    hardReviewThreshold: 0.02
+    hardReviewThreshold: 0.02,
+    absoluteCaps: {
+      MYR: "250.00",
+      USD: "50.00",
+      SGD: "70.00",
+      EUR: "50.00"
+    }
+  },
+  fees: {
+    flatFeeHypotheses: ["15.00", "25.00", "35.00", "50.00"]
+  },
+  reference: {
+    ignoredYears: Array.from({ length: 16 }, (_, index) => String(2020 + index)),
+    genericTokens: ["PAY", "PAYMENT", "TRX", "TXN", "REF", "BANK", "TRANSFER", "REMIT", "TT"]
+  },
+  autoMatch: {
+    allowBalancedPartialReference: true,
+    requireStrongAmountAndPartyForPartialReference: true
+  },
+  batch: {
+    maxInvoicesPerGroup: 12,
+    maxInvoicesPerCandidate: 5
   },
   score: {
     referenceExact: 35,

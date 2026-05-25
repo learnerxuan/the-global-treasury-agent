@@ -3,6 +3,8 @@ import type {
   AmountResidualResult,
   CompetitionResult,
   FeeHypothesisResult,
+  EvidenceTrustIssue,
+  EvidenceTrustSummary,
   FxScenarioResult,
   HardReviewFlag,
   MatchCandidate,
@@ -18,8 +20,12 @@ const COMPETITION_TOOL = "detectCompetingCandidates";
 // Proof fields whose low confidence must block an auto-match.
 const CRITICAL_PROOF_FIELD_ALIASES = [
   ["financialPayload.paidAmount.value", "paidAmount.value"],
+  ["financialPayload.paidAmount.currency", "paidAmount.currency"],
   ["financialPayload.reference.raw", "reference.raw"],
-  ["financialPayload.paymentDate", "paymentDate"]
+  ["financialPayload.paymentDate", "paymentDate"],
+  ["financialPayload.debtor.name", "financialPayload.debtor.rawName", "debtor.name", "debtor.rawName"],
+  ["financialPayload.creditor.name", "financialPayload.creditor.rawName", "creditor.name", "creditor.rawName"],
+  ["financialPayload.paymentStatus", "paymentStatus", "rawPaymentStatus"]
 ];
 
 function dayDistanceDays(a: string, b: string): number {
@@ -30,6 +36,14 @@ function dayDistanceDays(a: string, b: string): number {
 
 function hasSignal(candidate: MatchCandidate, code: string): boolean {
   return candidate.signals.some((s) => s.code === code);
+}
+
+function hasPartySignal(candidate: MatchCandidate): boolean {
+  return (
+    hasSignal(candidate, "NAME_MATCH") ||
+    hasSignal(candidate, "COUNTERPARTY_ALIAS_MATCH") ||
+    hasSignal(candidate, "COUNTERPARTY_ACCOUNT_MATCH")
+  );
 }
 
 function scoreReference(candidate: MatchCandidate, policy: ReconciliationPolicy): number {
@@ -63,7 +77,9 @@ function scoreDate(candidate: MatchCandidate, policy: ReconciliationPolicy): num
 }
 
 function scoreName(candidate: MatchCandidate, policy: ReconciliationPolicy): number {
-  return hasSignal(candidate, "NAME_MATCH") ? policy.score.nameMax : 0;
+  if (hasPartySignal(candidate)) return policy.score.nameMax;
+  if (hasSignal(candidate, "NAME_SIMILAR")) return Math.round(policy.score.nameMax / 2);
+  return 0;
 }
 
 function scoreConfidence(candidate: MatchCandidate, policy: ReconciliationPolicy): number {
@@ -73,10 +89,17 @@ function scoreConfidence(candidate: MatchCandidate, policy: ReconciliationPolicy
   return 0;
 }
 
-function lowCriticalConfidence(candidate: MatchCandidate, policy: ReconciliationPolicy): boolean {
+function buildEvidenceTrust(candidate: MatchCandidate, policy: ReconciliationPolicy): EvidenceTrustSummary {
   const ai = candidate.proof?.aiMetadata;
-  if (!ai) return false;
-  if (ai.overallConfidence < policy.confidenceFloor) return true;
+  if (!ai) {
+    return {
+      level: "missing_proof",
+      extractionRoute: null,
+      hasEvidenceSpans: false,
+      criticalFieldsChecked: [],
+      issues: []
+    };
+  }
   const proofAmounts = [
     candidate.proof?.financialPayload.paidAmount,
     candidate.proof?.financialPayload.targetAmount,
@@ -84,17 +107,65 @@ function lowCriticalConfidence(candidate: MatchCandidate, policy: Reconciliation
     candidate.proof?.financialPayload.netAmount
   ];
   const hasUsableProofAmount = proofAmounts.some((amount) => amount !== null && amount !== undefined);
-  return CRITICAL_PROOF_FIELD_ALIASES.some((aliases) => {
-    if (aliases.includes("financialPayload.paidAmount.value") && hasUsableProofAmount) return false;
+  const issues: EvidenceTrustIssue[] = [];
+  if (ai.overallConfidence < policy.confidenceFloor) {
+    issues.push({
+      source: "payment_proof",
+      field: "aiMetadata.overallConfidence",
+      confidence: ai.overallConfidence,
+      threshold: policy.confidenceFloor,
+      message: "Overall extraction confidence is below the auto-match floor."
+    });
+  }
+
+  const checked: string[] = [];
+  for (const aliases of CRITICAL_PROOF_FIELD_ALIASES) {
+    if (aliases.includes("financialPayload.paidAmount.value") && hasUsableProofAmount) continue;
+    checked.push(aliases[0]!);
     const value = aliases.map((field) => ai.fieldConfidence[field]).find((confidence) => confidence !== undefined);
-    return value !== undefined && value < policy.confidenceFloor;
-  });
+    if (value !== undefined && value < policy.confidenceFloor) {
+      issues.push({
+        source: "payment_proof",
+        field: aliases[0]!,
+        confidence: value,
+        threshold: policy.confidenceFloor,
+        message: `${aliases[0]} confidence is below the auto-match floor.`
+      });
+    }
+  }
+
+  const deterministicRoutes = new Set(["parse_csv_text", "parse_spreadsheet", "manual_correction"]);
+  return {
+    level: deterministicRoutes.has(ai.extractionRoute)
+      ? "deterministic"
+      : issues.length > 0
+        ? "weak_ai"
+        : "supported_ai",
+    extractionRoute: ai.extractionRoute,
+    hasEvidenceSpans: ai.evidenceSpans.length > 0,
+    criticalFieldsChecked: checked,
+    issues
+  };
+}
+
+function lowCriticalConfidence(evidenceTrust: EvidenceTrustSummary): boolean {
+  return evidenceTrust.issues.length > 0;
+}
+
+function dedupeCodes<T>(items: T[]): T[] {
+  return [...new Set(items)];
 }
 
 function buildReasonCodes(candidate: MatchCandidate, residual: AmountResidualResult, fee: FeeHypothesisResult, date: number, name: number, confidence: number): ReasonCode[] {
   const codes: ReasonCode[] = [];
 
-  codes.push(hasSignal(candidate, "EXACT_REFERENCE_MATCH") ? "EXACT_REFERENCE_MATCH" : "NO_REFERENCE");
+  if (hasSignal(candidate, "EXACT_REFERENCE_MATCH")) {
+    codes.push("EXACT_REFERENCE_MATCH");
+  } else if (hasSignal(candidate, "PARTIAL_REFERENCE_MATCH")) {
+    codes.push("PARTIAL_REFERENCE_MATCH");
+  } else {
+    codes.push("NO_REFERENCE");
+  }
 
   switch (residual.band) {
     case "WITHIN_TOLERANCE":
@@ -115,19 +186,26 @@ function buildReasonCodes(candidate: MatchCandidate, residual: AmountResidualRes
   }
 
   codes.push(date > 0 ? "DATE_CLOSE" : "DATE_FAR");
-  codes.push(name > 0 ? "NAME_MATCH" : "NAME_MISMATCH");
+  if (hasSignal(candidate, "COUNTERPARTY_ACCOUNT_MATCH")) codes.push("COUNTERPARTY_ACCOUNT_MATCH");
+  else if (hasSignal(candidate, "COUNTERPARTY_ALIAS_MATCH")) codes.push("COUNTERPARTY_ALIAS_MATCH");
+  else if (hasSignal(candidate, "NAME_MATCH")) codes.push("NAME_MATCH");
+  else if (hasSignal(candidate, "NAME_SIMILAR")) codes.push("NAME_SIMILAR");
+  else codes.push("NAME_MISMATCH");
   codes.push(confidence >= 3 ? "HIGH_EXTRACTION_CONFIDENCE" : "LOW_EXTRACTION_CONFIDENCE");
 
+  if (residual.residualClassification === "fxVariance") codes.push("FX_VARIANCE_EXPLAINS_RESIDUAL");
+  if (residual.residualClassification === "flatFee") codes.push("FLAT_FEE_EXPLAINS_RESIDUAL");
+  if (residual.exceedsAbsoluteCap) codes.push("RESIDUAL_ABSOLUTE_CAP_EXCEEDED");
   if (fee.direction === "SHORT") codes.push("POSSIBLE_FEE_OR_SPREAD", "POSSIBLE_SHORT_PAYMENT");
   if (fee.direction === "OVER") codes.push("POSSIBLE_OVERPAYMENT");
 
-  return codes;
+  return dedupeCodes(codes);
 }
 
-function buildHardReviewFlags(candidate: MatchCandidate, residual: AmountResidualResult, fee: FeeHypothesisResult, policy: ReconciliationPolicy): HardReviewFlag[] {
+function buildHardReviewFlags(candidate: MatchCandidate, residual: AmountResidualResult, fee: FeeHypothesisResult, policy: ReconciliationPolicy, evidenceTrust: EvidenceTrustSummary): HardReviewFlag[] {
   const flags: HardReviewFlag[] = [];
 
-  if (lowCriticalConfidence(candidate, policy)) flags.push("LOW_CONFIDENCE_CRITICAL_FIELD");
+  if (lowCriticalConfidence(evidenceTrust)) flags.push("LOW_CONFIDENCE_CRITICAL_FIELD");
 
   // Settlement is proven by the matched bank credit (actual cash received) plus
   // explained money math — not by a status word on the customer's proof. So we
@@ -135,15 +213,34 @@ function buildHardReviewFlags(candidate: MatchCandidate, residual: AmountResidua
   if (status === "PNDG" || status === "ACSP") flags.push("PROOF_NOT_SETTLED");
 
   if (residual.band === "NO_SCENARIO") flags.push("NO_FX_SCENARIO");
-  if (residual.exceedsHardReviewThreshold && residual.band !== "NO_SCENARIO") flags.push("RESIDUAL_ABOVE_THRESHOLD");
+  if (residual.exceedsHardReviewThreshold && residual.band !== "NO_SCENARIO" && residual.residualClassification !== "flatFee") {
+    flags.push("RESIDUAL_ABOVE_THRESHOLD");
+  }
+  if (
+    residual.exceedsAbsoluteCap &&
+    residual.residualClassification !== "flatFee" &&
+    residual.residualClassification !== "fxVariance"
+  ) {
+    flags.push("UNEXPLAINED_RESIDUAL_ABOVE_CAP");
+  }
 
-  if (fee.direction === "SHORT") flags.push("POSSIBLE_PARTIAL_PAYMENT");
+  const onlyFixture = residual.bestScenario?.fxSourceKind === "fixture_fallback";
+  if (onlyFixture && !hasSignal(candidate, "EXACT_REFERENCE_MATCH")) flags.push("FIXTURE_FALLBACK_ONLY");
+
+  if (fee.direction === "SHORT" && residual.residualClassification !== "flatFee") flags.push("POSSIBLE_PARTIAL_PAYMENT");
   if (fee.direction === "OVER") flags.push("POSSIBLE_OVERPAYMENT");
 
   const noReference = !hasSignal(candidate, "EXACT_REFERENCE_MATCH") && !hasSignal(candidate, "PARTIAL_REFERENCE_MATCH");
-  if (noReference && !hasSignal(candidate, "NAME_MATCH")) flags.push("MISSING_REFERENCE_WEAK_NAME");
+  if (noReference && !hasPartySignal(candidate)) flags.push("MISSING_REFERENCE_WEAK_NAME");
+  if (
+    hasSignal(candidate, "PARTIAL_REFERENCE_MATCH") &&
+    !hasSignal(candidate, "EXACT_REFERENCE_MATCH") &&
+    (!hasSignal(candidate, "AMOUNT_MATCHES_EXPECTED") || !hasPartySignal(candidate))
+  ) {
+    flags.push("PARTIAL_REFERENCE_WEAK_EVIDENCE");
+  }
 
-  return flags;
+  return dedupeCodes(flags);
 }
 
 export function scoreCandidate(input: {
@@ -160,17 +257,18 @@ export function scoreCandidate(input: {
   const date = scoreDate(candidate, policy);
   const name = scoreName(candidate, policy);
   const confidence = scoreConfidence(candidate, policy);
+  const evidenceTrust = buildEvidenceTrust(candidate, policy);
 
   const breakdown: ScoreBreakdown = { reference, amountFx, date, name, confidence, competitionPenalty: 0 };
   const score = Math.max(0, Math.min(100, reference + amountFx + date + name + confidence));
 
   const reasonCodes = buildReasonCodes(candidate, residual, feeHypothesis, date, name, confidence);
-  const hardReviewFlags = buildHardReviewFlags(candidate, residual, feeHypothesis, policy);
+  const hardReviewFlags = buildHardReviewFlags(candidate, residual, feeHypothesis, policy, evidenceTrust);
 
   return {
     ok: true,
     toolName: SCORE_TOOL,
-    data: { candidate, score, breakdown, fxScenarios, residual, feeHypothesis, reasonCodes, hardReviewFlags },
+    data: { candidate, score, breakdown, fxScenarios, residual, feeHypothesis, evidenceTrust, reasonCodes, hardReviewFlags },
     summary: `Scored ${candidate.candidateId} at ${score}/100 with ${hardReviewFlags.length} hard review flag(s).`
   };
 }

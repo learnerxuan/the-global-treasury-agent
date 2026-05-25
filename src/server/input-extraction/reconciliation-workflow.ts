@@ -294,8 +294,8 @@ async function readableTextFromStoredFile(path: string, mimeType: string, bytes:
 
   if (mimeType.startsWith("image/")) {
     try {
-      const text = await extractImageText(path);
-      return { text, warnings: [], observations: ["Image OCR text is available"] };
+      const ocrResult = await extractImageText(path);
+      return { text: ocrResult.text, warnings: [], observations: ["Image OCR text is available"] };
     } catch (error) {
       return {
         text: "",
@@ -589,18 +589,28 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
     const feeCurrency = feeAmount?.currency ?? (proof.feeCurrency ? toCurrency(proof.feeCurrency, paidAmount?.currency ?? "USD") : null);
     const paymentStatus = mapPaymentStatus(proof.paymentStatus);
     const reference = proof.reference;
+    const invoiceIds = [...new Set([...(proof.invoiceIds ?? []), ...(reference ? [reference] : [])].filter((value): value is string => Boolean(value)))];
+    const remittanceLineItems = (proof.remittanceLineItems ?? []).map((item) => ({
+      invoiceNumber: item.invoiceNumber,
+      paidAmount: extractedMoneyToAmount(item.paidAmount ?? null, paidAmount?.currency ?? "USD"),
+      discountAmount: extractedMoneyToAmount(item.discountAmount ?? null, paidAmount?.currency ?? "USD"),
+      feeAmount: extractedMoneyToAmount(item.feeAmount ?? null, paidAmount?.currency ?? "USD"),
+      note: item.note ?? null
+    }));
+    const isRemittanceAdvice = invoiceIds.length > 1 || remittanceLineItems.length > 0;
     const fieldConfidence: Record<string, number> = {
       "financialPayload.paidAmount.value": paidAmount ? extraction.confidence : 0,
       "financialPayload.paidAmount.currency": paidAmount ? extraction.confidence : 0,
       "financialPayload.paymentDate": proof.paymentDate ? extraction.confidence : 0,
-      "financialPayload.reference.raw": reference ? extraction.confidence : 0,
+      "financialPayload.reference.raw": reference || invoiceIds.length > 0 ? extraction.confidence : 0,
+      "financialPayload.invoiceIds": invoiceIds.length > 0 ? extraction.confidence : 0,
       "financialPayload.debtor.rawName": proof.payerName ? extraction.confidence : 0,
       "financialPayload.creditor.rawName": proof.creditorName ? extraction.confidence : 0
     };
     const warnings = [...extraction.warnings.map((warning) => toWarning(warning, null))];
     if (!paidAmount) warnings.push({ code: "MISSING_PAID_AMOUNT", message: "Payment proof amount is missing.", field: "financialPayload.paidAmount" });
     if (!proof.paymentDate) warnings.push({ code: "MISSING_PAYMENT_DATE", message: "Payment proof date is missing.", field: "financialPayload.paymentDate" });
-    if (!reference) warnings.push({ code: "MISSING_PAYMENT_REFERENCE", message: "Payment proof reference is missing.", field: "financialPayload.reference.raw" });
+    if (!reference && invoiceIds.length === 0) warnings.push({ code: "MISSING_PAYMENT_REFERENCE", message: "Payment proof reference is missing.", field: "financialPayload.reference.raw" });
     if (!proof.payerName) warnings.push({ code: "MISSING_DEBTOR", message: "Payment proof payer is missing.", field: "financialPayload.debtor.rawName" });
     if (!proof.creditorName) warnings.push({ code: "MISSING_CREDITOR", message: "Payment proof creditor is missing.", field: "financialPayload.creditor.rawName" });
 
@@ -609,7 +619,7 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
       proofId: `proof_${stored.documentId}_${String(index + 1).padStart(3, "0")}`,
       sourceFileId: stored.documentId,
       financialPayload: {
-        documentType: "provider_receipt",
+        documentType: isRemittanceAdvice ? "remittance_advice" : "provider_receipt",
         paymentStatus,
         paymentStatusLabel: paymentStatus === "ACSC" ? "Settled" : proof.paymentStatus,
         rawPaymentStatus: proof.paymentStatus,
@@ -624,7 +634,8 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
         reference: { raw: reference },
         providerTransactionId: null,
         providerOrBankName: proof.providerOrBankName,
-        invoiceIds: reference ? [reference] : [],
+        invoiceIds,
+        remittanceLineItems,
         endToEndId: null,
         uetr: null,
         feeAmount,
@@ -795,6 +806,8 @@ function calibrateExtractionConfidence(extraction: StructuredDocumentExtraction)
   };
 }
 
+function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
 async function extractStoredDocuments(
   extractor: StructuredExtractor,
   documents: StoredDocumentContent[]
@@ -816,6 +829,7 @@ async function extractStoredDocuments(
         toolObservations: [...document.stored.toolObservations, ...document.stored.warnings]
       });
       extractions.push(calibrateExtractionConfidence(extraction));
+      await sleep(1500);
     } catch (error) {
       extractions.push({
         role: document.stored.role,

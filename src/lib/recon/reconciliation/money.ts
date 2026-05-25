@@ -66,6 +66,17 @@ export function subtractMoney(a: string, b: string): string {
   return format(rescaleUp(da, scale) - rescaleUp(db, scale), scale);
 }
 
+export function addMoney(a: string, b: string): string {
+  const da = parse(a);
+  const db = parse(b);
+  const scale = Math.max(da.scale, db.scale);
+  return format(rescaleUp(da, scale) + rescaleUp(db, scale), scale);
+}
+
+export function sumMoney(values: string[]): string {
+  return values.reduce((sum, value) => addMoney(sum, value), "0.00");
+}
+
 export function absMoney(value: string): string {
   const d = parse(value);
   return format(d.mantissa < 0n ? -d.mantissa : d.mantissa, d.scale);

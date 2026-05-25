@@ -20,6 +20,7 @@ import type {
   paymentReferenceSchema,
   rawExtractedPartySchema,
   rawExtractedReferenceSchema,
+  remittanceLineItemSchema,
   remittanceInformationSchema,
   timelineEventSchema,
   warningCodeSchema,
@@ -37,6 +38,7 @@ export type NormalizedParty = z.infer<typeof normalizedPartySchema>;
 export type RawExtractedParty = z.infer<typeof rawExtractedPartySchema>;
 export type RawExtractedReference = z.infer<typeof rawExtractedReferenceSchema>;
 export type RemittanceInformation = z.infer<typeof remittanceInformationSchema>;
+export type RemittanceLineItem = z.infer<typeof remittanceLineItemSchema>;
 export type ExchangeRateInformation = z.infer<typeof exchangeRateInformationSchema>;
 export type FileStorageRef = z.infer<typeof fileStorageRefSchema>;
 export type InputFileDescriptor = z.infer<typeof inputFileDescriptorSchema>;

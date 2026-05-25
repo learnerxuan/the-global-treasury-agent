@@ -110,6 +110,14 @@ export const remittanceInformationSchema = z.object({
     .nullable()
 });
 
+export const remittanceLineItemSchema = z.object({
+  invoiceNumber: z.string().nullable(),
+  paidAmount: moneyAmountSchema.nullable(),
+  discountAmount: moneyAmountSchema.nullable().optional(),
+  feeAmount: moneyAmountSchema.nullable().optional(),
+  note: z.string().nullable().optional()
+});
+
 export const fileStorageRefSchema = z.object({
   kind: z.enum(["local_path", "object_storage", "uploaded_blob"]),
   uri: z.string(),
@@ -233,6 +241,7 @@ const paymentProofFinancialPayloadBaseSchema = z.object({
   providerTransactionId: z.string().nullable(),
   providerOrBankName: z.string().nullable(),
   invoiceIds: z.array(z.string()),
+  remittanceLineItems: z.array(remittanceLineItemSchema).optional(),
   endToEndId: z.string().nullable(),
   uetr: z.string().nullable(),
   feeAmount: moneyAmountSchema.nullable(),

@@ -15,26 +15,41 @@ const RESIDUAL: AmountResidualResult = {
   residualAmount: "0.00",
   residualPercent: 0,
   band: "WITHIN_TOLERANCE",
-  exceedsHardReviewThreshold: false
+  exceedsHardReviewThreshold: false,
+  residualClassification: "none",
+  absoluteCap: "250.00",
+  exceedsAbsoluteCap: false
+};
+
+const EVIDENCE_TRUST = {
+  level: "supported_ai" as const,
+  extractionRoute: "parse_pdf_text",
+  hasEvidenceSpans: false,
+  criticalFieldsChecked: [],
+  issues: []
 };
 
 function scored(score: number, opts: { flags?: HardReviewFlag[]; reasons?: ReasonCode[]; id?: string } = {}): ScoredCandidate {
   return {
     candidate: {
       candidateId: opts.id ?? "CAND-1",
+      candidateKind: "single_invoice",
       bankTransactionId: cleanNormalizedBatch.bankTransactions[0]!.internalTxId,
       proofId: "proof_001",
       expectedPaymentId: "exp_file_001_row002",
+      expectedPaymentIds: ["exp_file_001_row002"],
       signals: [],
       bankTransaction: cleanNormalizedBatch.bankTransactions[0]!,
       proof: cleanNormalizedBatch.paymentProofs[0]!,
-      expectedPayment: cleanNormalizedBatch.expectedPayments[0]!
+      expectedPayment: cleanNormalizedBatch.expectedPayments[0]!,
+      expectedPayments: [cleanNormalizedBatch.expectedPayments[0]!]
     },
     score,
     breakdown: { reference: 0, amountFx: 0, date: 0, name: 0, confidence: 0, competitionPenalty: 0 },
     fxScenarios: [],
     residual: RESIDUAL,
     feeHypothesis: { direction: "NONE", hypotheses: [], amount: null },
+    evidenceTrust: EVIDENCE_TRUST,
     reasonCodes: opts.reasons ?? [],
     hardReviewFlags: opts.flags ?? []
   };

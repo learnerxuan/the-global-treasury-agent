@@ -1,6 +1,7 @@
 import { readProofSource } from "./read-proof-source";
 import { buildToolResult } from "./build-tool-result";
 import { extractImageText } from "./image-ocr";
+import type { OcrResult } from "./image-ocr";
 import { makeWarning } from "./evidence";
 import type { PaymentProofInputDescriptor } from "../types";
 
@@ -8,10 +9,13 @@ export async function parseImageOcr(descriptor: PaymentProofInputDescriptor) {
   const source = await readProofSource(descriptor);
   const warnings = [...source.warnings];
   let text = "";
+  let ocrConfidence: number | undefined;
 
   if (source.localPath && descriptor.mimeType.startsWith("image/")) {
     try {
-      text = await extractImageText(source.localPath);
+      const ocrResult: OcrResult = await extractImageText(source.localPath);
+      text = ocrResult.text;
+      ocrConfidence = ocrResult.confidence;
     } catch (error) {
       warnings.push(
         makeWarning(
@@ -29,6 +33,7 @@ export async function parseImageOcr(descriptor: PaymentProofInputDescriptor) {
     text,
     evidenceSource: source.mode === "unreadable" ? "manual" : "image_ocr",
     sourceMode: source.mode,
-    sourceWarnings: warnings
+    sourceWarnings: warnings,
+    ...(ocrConfidence !== undefined ? { ocrConfidence } : {})
   });
 }

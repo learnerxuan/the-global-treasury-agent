@@ -41,7 +41,10 @@ const NO_SCENARIO_RESIDUAL: AmountResidualResult = {
   residualAmount: null,
   residualPercent: null,
   band: "NO_SCENARIO",
-  exceedsHardReviewThreshold: true
+  exceedsHardReviewThreshold: true,
+  residualClassification: "unexplained",
+  absoluteCap: null,
+  exceedsAbsoluteCap: true
 };
 
 const NONE_FEE: FeeHypothesisResult = { direction: "NONE", hypotheses: [], amount: null };
@@ -55,13 +58,16 @@ function makeCandidate(proofOverrides: Partial<NormalizedPaymentProofRecord["fin
   };
   return {
     candidateId: "CAND-X",
+    candidateKind: "single_invoice",
     bankTransactionId: cleanNormalizedBatch.bankTransactions[0]!.internalTxId,
     proofId: proof.proofId,
     expectedPaymentId: cleanNormalizedBatch.expectedPayments[0]!.expectedPaymentId,
+    expectedPaymentIds: [cleanNormalizedBatch.expectedPayments[0]!.expectedPaymentId],
     signals: [{ code: "EXACT_REFERENCE_MATCH", strength: "STRONG", detail: "ref" }],
     bankTransaction: cleanNormalizedBatch.bankTransactions[0]!,
     proof,
-    expectedPayment: cleanNormalizedBatch.expectedPayments[0]!
+    expectedPayment: cleanNormalizedBatch.expectedPayments[0]!,
+    expectedPayments: [cleanNormalizedBatch.expectedPayments[0]!]
   };
 }
 
@@ -74,6 +80,8 @@ const cleanFx: FxScenarioResult[] = [
     rate: "1",
     rateDate: "2026-05-20",
     rateSource: "same_currency",
+    fxSourceKind: "market_cached",
+    spreadMargin: 0,
     isFallback: false,
     expectedLocalAmount: { value: "250.00", currency: "USD" },
     residualAmount: "0.00",
@@ -86,7 +94,18 @@ const cleanResidual: AmountResidualResult = {
   residualAmount: "0.00",
   residualPercent: 0,
   band: "WITHIN_TOLERANCE",
-  exceedsHardReviewThreshold: false
+  exceedsHardReviewThreshold: false,
+  residualClassification: "none",
+  absoluteCap: "50.00",
+  exceedsAbsoluteCap: false
+};
+
+const EVIDENCE_TRUST = {
+  level: "supported_ai" as const,
+  extractionRoute: "parse_pdf_text",
+  hasEvidenceSpans: false,
+  criticalFieldsChecked: [],
+  issues: []
 };
 
 describe("scoreCandidate", () => {
@@ -158,7 +177,10 @@ describe("scoreCandidate", () => {
       residualAmount: "-1487.50",
       residualPercent: 0.035,
       band: "SIGNIFICANT_VARIANCE",
-      exceedsHardReviewThreshold: true
+      exceedsHardReviewThreshold: true,
+      residualClassification: "shortPayment",
+      absoluteCap: "50.00",
+      exceedsAbsoluteCap: true
     };
     const fee: FeeHypothesisResult = { direction: "SHORT", amount: "1487.50", hypotheses: ["Possible fee"] };
     const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: significant, feeHypothesis: fee, policy: DEFAULT_POLICY });
@@ -185,6 +207,7 @@ function scoredWith(score: number, candidateId: string): ScoredCandidate {
     fxScenarios: cleanFx,
     residual: cleanResidual,
     feeHypothesis: NONE_FEE,
+    evidenceTrust: EVIDENCE_TRUST,
     reasonCodes: [],
     hardReviewFlags: []
   };

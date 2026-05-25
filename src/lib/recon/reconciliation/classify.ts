@@ -57,6 +57,10 @@ export function classifyMatch(input: {
   // NEEDS_REVIEW. A high score never overrides a hard review flag.
   let status = scoreTier(selected.score, policy);
   const hasHardConcern = hardReviewFlags.length > 0 || competition.hasCompetition;
+  if (selected.candidate.candidateKind === "proof_only" || selected.candidate.candidateKind === "bank_only") {
+    if (!reasonCodes.includes("NO_CANDIDATE")) reasonCodes.push("NO_CANDIDATE");
+    status = BY_RANK[Math.min(RANK[status], RANK.NEEDS_REVIEW)]!;
+  }
   if (hasHardConcern) {
     if (status === "UNMATCHED" && selected.score >= 45) {
       status = "NEEDS_REVIEW";

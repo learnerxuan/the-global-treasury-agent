@@ -7,6 +7,7 @@ import type {
   ReasonCode,
   ReconciliationStatus,
   ReviewSeverity,
+  HardReviewFlag,
   ToolResult
 } from "./types";
 
@@ -59,6 +60,8 @@ export function createHumanReviewRequest(input: {
   options?: HumanReviewOption[];
   evidenceRefs: EvidenceRef[];
   reasonCodes: ReasonCode[];
+  hardReviewFlags?: HardReviewFlag[];
+  suggestedActions?: string[];
 }): ToolResult<HumanReviewRequest> {
   const review: HumanReviewRequest = {
     reviewId: `${input.caseId}-REVIEW`,
@@ -68,7 +71,9 @@ export function createHumanReviewRequest(input: {
     question: input.question,
     ...(input.options ? { options: input.options } : {}),
     evidenceRefs: input.evidenceRefs,
-    reasonCodes: input.reasonCodes
+    reasonCodes: input.reasonCodes,
+    ...(input.hardReviewFlags ? { hardReviewFlags: input.hardReviewFlags } : {}),
+    ...(input.suggestedActions ? { suggestedActions: input.suggestedActions } : {})
   };
   return {
     ok: true,

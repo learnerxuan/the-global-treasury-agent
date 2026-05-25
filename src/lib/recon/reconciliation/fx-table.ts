@@ -31,7 +31,7 @@ const FX_TABLES: Partial<Record<string, FxRateEntry[]>> = {
   EUR_MYR: EUR_MYR_RATES
 };
 
-export type FxRateSource = "same_currency" | "fixture_exact" | "fixture_nearest";
+export type FxRateSource = "same_currency" | "fixture_exact" | "fixture_nearest" | "market_cached" | "live_api";
 
 export type FxRateLookup = {
   base: CurrencyCode;

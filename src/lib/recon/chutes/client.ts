@@ -18,6 +18,8 @@ export type ChutesChatOptions = {
   messages: ChutesChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  responseFormat?: { type: "json_object" };
+  timeoutMs?: number;
 };
 
 // Transient HTTP statuses worth retrying. 429 = rate limited (the common one for
@@ -72,7 +74,7 @@ export class ChutesClient {
 
     const envAttempts = Number(readLocalEnvValue("LLM_MAX_ATTEMPTS"));
     this.maxAttempts = Math.max(1, options.maxAttempts ?? (Number.isFinite(envAttempts) && envAttempts > 0 ? envAttempts : 4));
-    this.retryBaseDelayMs = Math.max(0, options.retryBaseDelayMs ?? 600);
+    this.retryBaseDelayMs = Math.max(0, options.retryBaseDelayMs ?? 2000);
   }
 
   private backoffMs(attempt: number, retryAfterHeader: string | null): number {
@@ -96,21 +98,25 @@ export class ChutesClient {
       model: this.model,
       messages: options.messages,
       temperature: options.temperature ?? 0,
-      max_tokens: options.maxTokens ?? 1600
+      max_tokens: options.maxTokens ?? 1600,
+      ...(options.responseFormat ? { response_format: options.responseFormat } : {})
     });
 
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       let response: Response;
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), options.timeoutMs ?? 30_000);
       try {
         response = await fetch(`${this.baseUrl}/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeader },
-          body: requestBody
+          body: requestBody,
+          signal: abortController.signal
         });
       } catch (networkError) {
-        // Network/DNS/connection error — retry.
+        // Network/DNS/connection/timeout error — retry.
         lastError = new Error(
           `${this.provider} request failed (network): ${networkError instanceof Error ? networkError.message : "unknown error"}`
         );
@@ -119,6 +125,8 @@ export class ChutesClient {
           continue;
         }
         throw lastError;
+      } finally {
+        clearTimeout(timeout);
       }
 
       const text = await response.text();

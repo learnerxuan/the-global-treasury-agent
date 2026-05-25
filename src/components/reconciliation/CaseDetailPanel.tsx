@@ -105,14 +105,48 @@ function FxReasoningPanel({ result }: { result: ReconciliationResult }) {
         </div>
         <div>
           <dt>Source</dt>
-          <dd>{fx.rateSource.replace(/_/g, " ")}</dd>
+          <dd>{fx.fxSourceKind.replace(/_/g, " ")}</dd>
         </div>
         <div>
           <dt>Basis</dt>
           <dd>{fx.basis.replace(/_/g, " ")}</dd>
         </div>
+        <div>
+          <dt>Spread</dt>
+          <dd>{fx.spreadMargin === 0 ? "none" : formatPercent(Math.abs(fx.spreadMargin))}</dd>
+        </div>
+        <div>
+          <dt>Residual type</dt>
+          <dd>{result.residual?.residualClassification?.replace(/([A-Z])/g, " $1").toLowerCase() ?? "â€”"}</dd>
+        </div>
       </dl>
     </div>
+  );
+}
+
+function AllocationPanel({ result }: { result: ReconciliationResult }) {
+  if (!result.allocations || result.allocations.length === 0) return null;
+
+  return (
+    <>
+      <p className="modal-section-title eyebrow">Payment allocation</p>
+      <div className="recon-evidence">
+        <div className="recon-evidence-head">
+          <span>Invoice</span>
+          <span>Applied</span>
+          <span>Remaining</span>
+          <span>Reason</span>
+        </div>
+        {result.allocations.map((allocation) => (
+          <div className="recon-evidence-row" key={allocation.expectedPaymentId}>
+            <span className="recon-evidence-label">{allocation.invoiceNumber}</span>
+            <span className="recon-evidence-cell">{formatMoney(allocation.appliedAmount)}</span>
+            <span className="recon-evidence-cell">{formatMoney(allocation.remainingAmount)}</span>
+            <span className="recon-evidence-cell">{allocation.reason.replace(/_/g, " ")}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -149,8 +183,12 @@ export function CaseDetailPanel({ result, index }: { result: ReconciliationResul
   return (
     <div className="recon-detail-content">
       <p className="recon-explanation">{result.explanation}</p>
+      <p className="eyebrow">
+        {result.candidateKind?.replace(/_/g, " ") ?? "candidate"} · policy {result.policyVersion ?? "unknown"}
+      </p>
       <p className="modal-section-title eyebrow">Evidence comparison</p>
       <EvidenceComparison result={result} index={index} />
+      <AllocationPanel result={result} />
       <div className="recon-detail-split">
         <FxReasoningPanel result={result} />
         <ScoreAndFlagsPanel result={result} />

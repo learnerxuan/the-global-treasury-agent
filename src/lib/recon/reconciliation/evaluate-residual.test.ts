@@ -12,6 +12,8 @@ function fx(basis: FxScenarioBasis, residualAmount: string, residualPercent: num
     rate: "4.2500",
     rateDate: "2026-05-20",
     rateSource: "fixture_exact",
+    fxSourceKind: "fixture_fallback",
+    spreadMargin: 0,
     isFallback: false,
     expectedLocalAmount: { value: expectedLocal, currency: "MYR" },
     residualAmount,
@@ -78,7 +80,11 @@ function residual(band: AmountResidualResult["band"], residualAmount: string | n
     residualAmount,
     residualPercent,
     band,
-    exceedsHardReviewThreshold: band === "SIGNIFICANT_VARIANCE" || band === "UNEXPLAINED" || band === "NO_SCENARIO"
+    exceedsHardReviewThreshold: band === "SIGNIFICANT_VARIANCE" || band === "UNEXPLAINED" || band === "NO_SCENARIO",
+    residualClassification:
+      band === "WITHIN_TOLERANCE" ? "none" : residualAmount?.startsWith("-") ? "shortPayment" : residualAmount ? "overPayment" : "unexplained",
+    absoluteCap: "250.00",
+    exceedsAbsoluteCap: false
   };
 }
 

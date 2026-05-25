@@ -6,6 +6,7 @@ import {
   extractInvoiceIds,
   extractMoney,
   extractPaymentStatus,
+  extractRemittanceLineItems,
   tableToText
 } from "./extract-payment-fields";
 
@@ -42,5 +43,21 @@ describe("extract-payment-fields", () => {
 
   it("flattens table rows into searchable text", () => {
     expect(tableToText([["payer", "Beta Exports Ltd"]])).toBe("payer: Beta Exports Ltd");
+  });
+
+  it("extracts multiple remittance invoice lines with paid amounts", () => {
+    const text = [
+      "Invoice IDs",
+      "INV-B1 MYR 100.00 settled",
+      "INV-2026-1007 MYR 250.00 settled",
+      "RCN-1010 USD 75.50 settled"
+    ].join("\n");
+
+    expect(extractInvoiceIds(text)).toEqual(["INV-B1", "INV-2026-1007", "RCN-1010"]);
+    expect(extractRemittanceLineItems(text).map((item) => [item.invoiceNumber, item.paidAmount])).toEqual([
+      ["INV-B1", { value: "100.00", currency: "MYR" }],
+      ["INV-2026-1007", { value: "250.00", currency: "MYR" }],
+      ["RCN-1010", { value: "75.50", currency: "USD" }]
+    ]);
   });
 });

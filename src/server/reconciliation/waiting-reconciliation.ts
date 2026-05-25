@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { createRuntimeBnmFxProvider, hydrateBnmRatesForBatch } from "../../lib/recon/reconciliation/fx-provider";
 import { runReconciliationOrchestrator } from "../../lib/recon/reconciliation/orchestrator";
+import { LocalJsonCounterpartyIdentityStore, LocalJsonPaymentApplicationStore } from "../../lib/recon/reconciliation/stores";
 import type { OrchestratorOutput, ReconciliationResult, ReconciliationStatus } from "../../lib/recon/reconciliation/types";
 import {
   bankStatementTransactionSchema,
@@ -256,7 +258,9 @@ async function writeCompletionOutputs(input: {
   const completedRoot = join(input.extractedDir, "completed");
   const movedRecords = (
     await Promise.all([
-      moveMatchedRecord(input.invoiceRecords, "invoice", input.selectedResult.expectedPaymentId, join(completedRoot, "invoices")),
+      ...((input.selectedResult.expectedPaymentIds ?? (input.selectedResult.expectedPaymentId ? [input.selectedResult.expectedPaymentId] : [])).map((id) =>
+        moveMatchedRecord(input.invoiceRecords, "invoice", id, join(completedRoot, "invoices"))
+      )),
       moveMatchedRecord(input.bankRecords, "bank_statement", input.selectedResult.bankTransactionId, join(completedRoot, "bank_transactions")),
       moveMatchedRecord(input.proofRecords, "payment_proof", input.selectedResult.proofId, join(completedRoot, "payment_proofs"))
     ])
@@ -403,7 +407,15 @@ export async function runReconciliationForWaitingProof(
     timelines: []
   };
 
-  const reconciliation = runReconciliationOrchestrator(batch);
+  const applicationStore = new LocalJsonPaymentApplicationStore(join(extractedDir, "payment_applications"));
+  const counterpartyIdentityStore = new LocalJsonCounterpartyIdentityStore(join(extractedDir, "counterparties", "counterparty-identities.json"));
+  const runtimeFx = createRuntimeBnmFxProvider(join(extractedDir, "fx-cache", "bnm"));
+  await hydrateBnmRatesForBatch(batch, runtimeFx.bnmProvider);
+  const reconciliation = runReconciliationOrchestrator(batch, {
+    paymentApplicationStore: applicationStore,
+    counterpartyIdentityStore,
+    fxProvider: runtimeFx.provider
+  });
   const selectedResult = chooseSelectedResult(reconciliation.results, proofRecord.record.proofId);
   const status = statusFromSelectedResult(selectedResult, batch);
   const summary = buildProofLevelSummary(status, selectedResult);
@@ -427,10 +439,13 @@ export async function runReconciliationForWaitingProof(
   let discrepancySummaryPath: string | null = null;
   let mockNotificationPath: string | null = null;
   let movedRecords: MovedRecord[] = [];
+  const hasSelectedExpected =
+    Boolean(selectedResult?.expectedPaymentId) || Boolean((selectedResult?.expectedPaymentIds?.length ?? 0) > 0);
 
   if (
     status === "AUTO_MATCHED" &&
-    selectedResult?.expectedPaymentId &&
+    selectedResult &&
+    hasSelectedExpected &&
     selectedResult.bankTransactionId &&
     selectedResult.proofId
   ) {

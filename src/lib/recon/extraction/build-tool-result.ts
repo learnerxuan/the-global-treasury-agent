@@ -10,6 +10,7 @@ import {
   extractParty,
   extractPaymentStatus,
   extractProviderOrBankName,
+  extractRemittanceLineItems,
   extractReference
 } from "./extract-payment-fields";
 import type { ExtractionRoute, ExtractionToolResult } from "./tools";
@@ -21,6 +22,8 @@ type BuildInput = {
   evidenceSource: FieldEvidence["source"];
   sourceMode: "real_file" | "unreadable";
   sourceWarnings: Warning[];
+  /** OCR confidence score (0-100) from Tesseract, if available. */
+  ocrConfidence?: number;
 };
 
 function confidenceFor(route: BuildInput["route"], field: "party" | "critical"): number {
@@ -41,6 +44,7 @@ export function buildToolResult(input: BuildInput): ExtractionToolResult {
   const paymentDate = extractDate(input.text);
   const reference = extractReference(input.text);
   const invoiceIds = extractInvoiceIds(input.text);
+  const remittanceLineItems = extractRemittanceLineItems(input.text);
   const paymentStatus = extractPaymentStatus(input.text);
   const providerOrBankName = extractProviderOrBankName(input.text);
   const debtorName = extractParty(input.text, ["Payer", "Sender", "Debtor"]);
@@ -129,6 +133,15 @@ export function buildToolResult(input: BuildInput): ExtractionToolResult {
     });
   }
 
+  // Apply OCR confidence penalty when Tesseract reports low confidence
+  if (input.ocrConfidence !== undefined && input.ocrConfidence < 60) {
+    const penalty = input.ocrConfidence / 100;
+    for (const key of Object.keys(fieldConfidence)) {
+      const val = fieldConfidence[key];
+      if (val !== undefined) fieldConfidence[key] = val * penalty;
+    }
+  }
+
   const payload: Partial<PaymentProofFinancialPayload> = {
     documentType:
       input.route === "parse_pdf_table" ? "bank_advice" : input.route === "parse_image_ocr" ? "remittance_advice" : "provider_receipt",
@@ -142,6 +155,7 @@ export function buildToolResult(input: BuildInput): ExtractionToolResult {
     reference,
     providerOrBankName,
     invoiceIds,
+    remittanceLineItems,
     providerTransactionId: input.text.match(/\b(?:WISE|DBS|MYB)-[A-Z0-9-]+\b/i)?.[0] ?? null,
     sourceAmount,
     targetAmount: targetAmount ? { value: targetAmount.value, currency: targetAmount.currency } : null,

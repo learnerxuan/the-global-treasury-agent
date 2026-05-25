@@ -1,4 +1,4 @@
-import { absMoney, isNegativeMoney } from "./money";
+import { absMoney, compareMoney, isNegativeMoney } from "./money";
 import type { ReconciliationPolicy } from "./policy";
 import type {
   AmountResidualResult,
@@ -19,6 +19,15 @@ function bandFor(residualPercent: number, policy: ReconciliationPolicy): Residua
   return "UNEXPLAINED";
 }
 
+function absoluteCapFor(currency: string | undefined, policy: ReconciliationPolicy): string | null {
+  if (!currency) return null;
+  return policy.residual.absoluteCaps[currency as keyof typeof policy.residual.absoluteCaps] ?? null;
+}
+
+function matchesFlatFee(amount: string, policy: ReconciliationPolicy): boolean {
+  return policy.fees.flatFeeHypotheses.some((fee) => compareMoney(amount, fee) === 0);
+}
+
 export function evaluateAmountResidual(input: {
   fxScenarios: FxScenarioResult[];
   policy: ReconciliationPolicy;
@@ -34,7 +43,10 @@ export function evaluateAmountResidual(input: {
         residualAmount: null,
         residualPercent: null,
         band: "NO_SCENARIO",
-        exceedsHardReviewThreshold: true
+        exceedsHardReviewThreshold: true,
+        residualClassification: "unexplained",
+        absoluteCap: null,
+        exceedsAbsoluteCap: true
       },
       summary: "No usable FX scenario; residual cannot be explained."
     };
@@ -51,6 +63,19 @@ export function evaluateAmountResidual(input: {
   const residualPercent = Math.abs(best.residualPercent);
   const band = bandFor(residualPercent, policy);
   const exceedsHardReviewThreshold = residualPercent > policy.residual.hardReviewThreshold;
+  const absResidual = absMoney(best.residualAmount);
+  const cap = absoluteCapFor(best.expectedLocalAmount.currency, policy);
+  const exceedsAbsoluteCap = cap === null ? compareMoney(absResidual, "0") > 0 : compareMoney(absResidual, cap) > 0;
+  const residualClassification =
+    compareMoney(absResidual, "0") === 0 || band === "WITHIN_TOLERANCE"
+      ? "none"
+      : matchesFlatFee(absResidual, policy)
+        ? "flatFee"
+        : best.fxSourceKind === "spread_adjusted" || (band === "SMALL_VARIANCE" && best.foreignAmount.currency !== best.expectedLocalAmount.currency)
+          ? "fxVariance"
+          : isNegativeMoney(best.residualAmount)
+            ? "shortPayment"
+            : "overPayment";
 
   return {
     ok: true,
@@ -58,10 +83,13 @@ export function evaluateAmountResidual(input: {
     data: {
       bestScenario: best,
       residualAmount: best.residualAmount,
-      residualPercent,
-      band,
-      exceedsHardReviewThreshold
-    },
+        residualPercent,
+        band,
+        exceedsHardReviewThreshold,
+        residualClassification,
+        absoluteCap: cap,
+        exceedsAbsoluteCap
+      },
     summary: `${best.label} best explains the amount with ${(residualPercent * 100).toFixed(2)}% residual (${band}).`
   };
 }
@@ -87,6 +115,19 @@ export function evaluateFeeHypothesis(input: {
   }
 
   const amount = absMoney(residual.residualAmount);
+
+  if (residual.residualClassification === "flatFee") {
+    return {
+      ok: true,
+      toolName: FEE_TOOL,
+      data: {
+        direction: "SHORT",
+        amount,
+        hypotheses: ["Allowed flat intermediary or wire fee"]
+      },
+      summary: `Bank credit is ${amount} below the best FX explanation and matches an allowed flat fee.`
+    };
+  }
 
   if (isNegativeMoney(residual.residualAmount)) {
     // Bank received less than expected.

@@ -54,6 +54,7 @@ function buildCandidate(overrides: {
 
   return {
     candidateId: "CAND-001",
+    candidateKind: expectedPayment ? "single_invoice" : "proof_only",
     bankTransactionId: bankTransaction.internalTxId,
     proofId: proof.proofId,
     ...(expectedPayment ? { expectedPaymentId: expectedPayment.expectedPaymentId } : {}),

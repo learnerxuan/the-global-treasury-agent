@@ -6,13 +6,12 @@ import type {
   NormalizedInputBatch,
   NormalizedPaymentProofRecord
 } from "../types";
-import { compareMoney } from "./money";
+import { compareMoney, sumMoney } from "./money";
 import type { ReconciliationPolicy } from "./policy";
-import type { CandidateSet, CandidateSignal, MatchCandidate, ToolResult } from "./types";
+import { LocalCounterpartyIdentityStore, type CounterpartyIdentityStore } from "./stores";
+import type { AllocationReason, CandidateSet, CandidateSignal, MatchCandidate, PaymentAllocation, ToolResult } from "./types";
 
 const TOOL_NAME = "generateBankAnchoredCandidates";
-
-// Payment statuses we will not even build matching candidates for.
 const REJECTED_STATUSES = new Set(["RJCT", "CANC"]);
 
 function dayDistanceDays(a: string, b: string): number {
@@ -39,21 +38,48 @@ function referenceLinked(refs: Set<string>, text: string | null, target: string 
   return text !== null && text.includes(target);
 }
 
-// True when two normalized references are not identical but share an invoice
-// core — one contains the other (>=5 chars) or they share a >=4-digit run (one
-// digit run contained in the other). Catches "1007" vs "INV20261007",
-// "RP1005" vs "RP20261005", "INV1006GL" vs "INV20261006".
-function partialReferenceMatch(a: string | null, b: string | null): boolean {
-  if (!a || !b || a === b) return false;
-  if (a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a))) return true;
-  const runsA = a.match(/\d{4,}/g) ?? [];
-  const runsB = b.match(/\d{4,}/g) ?? [];
-  return runsA.some((x) => runsB.some((y) => x === y || x.includes(y) || y.includes(x)));
+function compactReference(input: string, policy: ReconciliationPolicy): string {
+  const withoutIgnoredYears = policy.reference.ignoredYears.reduce((value, year) => value.replace(new RegExp(year, "g"), ""), input);
+  let compact = withoutIgnoredYears;
+  for (const token of policy.reference.genericTokens) {
+    compact = compact.replace(new RegExp(token, "g"), "");
+  }
+  return compact;
 }
 
+function alphaPrefix(ref: string): string | null {
+  return ref.match(/^[A-Z]+/)?.[0] ?? null;
+}
+
+function meaningfulNumericRuns(ref: string, policy: ReconciliationPolicy): string[] {
+  return (ref.match(/\d{3,}/g) ?? []).filter((run) => !policy.reference.ignoredYears.includes(run));
+}
+
+function partialReferenceMatch(a: string | null, b: string | null, policy: ReconciliationPolicy): boolean {
+  if (!a || !b || a === b) return false;
+  const compactA = compactReference(a, policy);
+  const compactB = compactReference(b, policy);
+  if (!compactA || !compactB) return false;
+
+  if (compactA.length >= 5 && compactB.length >= 5 && (compactA.includes(compactB) || compactB.includes(compactA))) {
+    const prefixA = alphaPrefix(compactA);
+    const prefixB = alphaPrefix(compactB);
+    return prefixA === null || prefixB === null || prefixA === prefixB;
+  }
+
+  const runsA = meaningfulNumericRuns(compactA, policy);
+  const runsB = meaningfulNumericRuns(compactB, policy);
+  return runsA.some((x) =>
+    runsB.some((y) => (x === y || x.includes(y) || y.includes(x)) && (x.length >= 4 || y.length >= 4))
+  );
+}
 
 function amountEqual(a: MoneyAmount | null | undefined, b: MoneyAmount | null | undefined): boolean {
   return a != null && b != null && a.currency === b.currency && compareMoney(a.value, b.value) === 0;
+}
+
+function canReceivePayment(expected: ExpectedPaymentRecord): boolean {
+  return expected.reconciliationStatus === "OPEN" || expected.reconciliationStatus === "PARTIALLY_MATCHED";
 }
 
 function proofComparableAmounts(proof: NormalizedPaymentProofRecord | null): Array<MoneyAmount | null | undefined> {
@@ -67,12 +93,44 @@ function proofComparableAmounts(proof: NormalizedPaymentProofRecord | null): Arr
   ];
 }
 
-function nameMatch(a: string | null, b: string | null): boolean {
+function exactNameMatch(a: string | null, b: string | null): boolean {
   return a !== null && b !== null && a === b;
 }
 
-// Signals tying a bank settlement row to a payment proof.
-function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPaymentProofRecord): CandidateSignal[] {
+function similarName(a: string | null, b: string | null): boolean {
+  if (!a || !b || a === b) return false;
+  const left = a.replace(/\s+/g, "");
+  const right = b.replace(/\s+/g, "");
+  return left.length >= 5 && right.length >= 5 && (left.includes(right) || right.includes(left));
+}
+
+function partySignals(input: {
+  leftName: string | null;
+  rightName: string | null;
+  leftAccount?: import("../types").AccountIdentifier | null;
+  rightAccount?: import("../types").AccountIdentifier | null;
+  exactDetail: string;
+  aliasDetail: string;
+  accountDetail: string;
+  similarDetail: string;
+  identityStore: CounterpartyIdentityStore;
+}): CandidateSignal[] {
+  if (input.leftAccount && input.rightAccount && input.identityStore.accountsMatch(input.leftAccount, input.rightAccount)) {
+    return [{ code: "COUNTERPARTY_ACCOUNT_MATCH", strength: "STRONG", detail: input.accountDetail }];
+  }
+  if (exactNameMatch(input.leftName, input.rightName)) {
+    return [{ code: "NAME_MATCH", strength: "MEDIUM", detail: input.exactDetail }];
+  }
+  if (input.identityStore.namesMatch(input.leftName, input.rightName)) {
+    return [{ code: "COUNTERPARTY_ALIAS_MATCH", strength: "STRONG", detail: input.aliasDetail }];
+  }
+  if (similarName(input.leftName, input.rightName)) {
+    return [{ code: "NAME_SIMILAR", strength: "MEDIUM", detail: input.similarDetail }];
+  }
+  return [];
+}
+
+function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPaymentProofRecord, identityStore: CounterpartyIdentityStore): CandidateSignal[] {
   const signals: CandidateSignal[] = [];
   const refs = bankReferenceSet(bank);
   const text = bankTextNormalized(bank);
@@ -81,13 +139,7 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
   if (referenceLinked(refs, text, proofRef)) {
     signals.push({ code: "EXACT_REFERENCE_MATCH", strength: "STRONG", detail: `Bank references proof ${proofRef}.` });
   }
-  // Note: we intentionally do NOT fuzzy-match against the bank's machine reference
-  // (e.g. "REF20260521001") — its digit runs collide with invoice numbers and
-  // produce false links. Bank↔proof relies on exact reference or amount instead.
 
-  // The bank settlement is local currency; cross-border proofs are foreign currency.
-  // Match against bank.amount (local) OR bank.sourceAmount (the foreign amount the
-  // bank itself recorded for the incoming remittance).
   const proofAmounts = proofComparableAmounts(proof);
   const matchesLocal = proofAmounts.some((amount) => amountEqual(amount, bank.amount));
   const matchesSource = proofAmounts.some((amount) => amountEqual(amount, bank.sourceAmount));
@@ -98,9 +150,19 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
       detail: matchesSource ? "Proof amount equals bank-recorded source amount." : "Proof amount equals bank credit."
     });
   }
-  if (nameMatch(bank.debtorNormalizedName, proof.financialPayload.debtor.normalizedName)) {
-    signals.push({ code: "NAME_MATCH", strength: "MEDIUM", detail: "Payer name matches bank debtor." });
-  }
+  signals.push(
+    ...partySignals({
+      leftName: bank.debtorNormalizedName,
+      rightName: proof.financialPayload.debtor.normalizedName,
+      leftAccount: bank.debtorAccount,
+      rightAccount: proof.financialPayload.debtorAccount,
+      exactDetail: "Payer name matches bank debtor.",
+      aliasDetail: "Payer is a known alias of the bank debtor.",
+      accountDetail: "Payer account matches the bank debtor account.",
+      similarDetail: "Payer name is similar to the bank debtor.",
+      identityStore
+    })
+  );
   const proofDate = proof.financialPayload.paymentDate;
   if (proofDate && dayDistanceDays(proofDate, bank.bookingDate) <= 7) {
     signals.push({ code: "DATE_CLOSE", strength: "MEDIUM", detail: "Payment date near bank booking date." });
@@ -108,11 +170,12 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
   return signals;
 }
 
-// Signals tying an expected payment to the bank settlement row and/or the proof.
 function expectedLinkSignals(
   bank: BankStatementTransaction,
   proof: NormalizedPaymentProofRecord | null,
-  expected: ExpectedPaymentRecord
+  expected: ExpectedPaymentRecord,
+  policy: ReconciliationPolicy,
+  identityStore: CounterpartyIdentityStore
 ): CandidateSignal[] {
   const signals: CandidateSignal[] = [];
   const refs = bankReferenceSet(bank);
@@ -124,13 +187,17 @@ function expectedLinkSignals(
   const linkedToProof = expectedRef !== null && proofRef !== null && expectedRef === proofRef;
   if (linkedToBank || linkedToProof) {
     signals.push({ code: "EXACT_REFERENCE_MATCH", strength: "STRONG", detail: `Expected payment ${expectedRef} reference chain.` });
-  } else if (partialReferenceMatch(expectedRef, proofRef)) {
-    // Only fuzzy-match invoice ref against the proof ref (both invoice-number
-    // derived) — never against the bank's machine reference.
-    signals.push({ code: "PARTIAL_REFERENCE_MATCH", strength: "MEDIUM", detail: `Expected payment ${expectedRef} shares a reference core with proof ${proofRef}.` });
+  } else if (partialReferenceMatch(expectedRef, proofRef, policy)) {
+    signals.push({
+      code: "PARTIAL_REFERENCE_MATCH",
+      strength: "MEDIUM",
+      detail: `Expected payment ${expectedRef} shares a non-generic reference core with proof ${proofRef}.`
+    });
   }
-  const matchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expected.amountDue));
-  const matchesBankSource = amountEqual(expected.amountDue, bank.sourceAmount);
+
+  const expectedAmount = expected.outstandingAmount ?? expected.amountDue;
+  const matchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expectedAmount));
+  const matchesBankSource = amountEqual(expectedAmount, bank.sourceAmount);
   if (matchesProof || matchesBankSource) {
     signals.push({
       code: "AMOUNT_MATCHES_EXPECTED",
@@ -138,12 +205,33 @@ function expectedLinkSignals(
       detail: matchesBankSource ? "Invoice amount equals bank-recorded source amount." : "Proof amount equals invoiced amount."
     });
   }
-  if (nameMatch(bank.debtorNormalizedName, expected.debtor.normalizedName)) {
-    signals.push({ code: "NAME_MATCH", strength: "MEDIUM", detail: "Invoice debtor matches bank debtor." });
-  } else if (proof && nameMatch(proof.financialPayload.debtor.normalizedName, expected.debtor.normalizedName)) {
-    // Bank statements frequently omit the payer name. If the proof payer and the
-    // invoice debtor agree, the counterparty is still confirmed across documents.
-    signals.push({ code: "NAME_MATCH", strength: "MEDIUM", detail: "Proof payer matches invoice debtor." });
+  const bankExpectedSignals = partySignals({
+    leftName: bank.debtorNormalizedName,
+    rightName: expected.debtor.normalizedName,
+    leftAccount: bank.debtorAccount,
+    rightAccount: expected.debtorAccount,
+    exactDetail: "Invoice debtor matches bank debtor.",
+    aliasDetail: "Invoice debtor is a known alias of the bank debtor.",
+    accountDetail: "Invoice debtor account matches the bank debtor account.",
+    similarDetail: "Invoice debtor name is similar to the bank debtor.",
+    identityStore
+  });
+  if (bankExpectedSignals.length > 0) {
+    signals.push(...bankExpectedSignals);
+  } else if (proof) {
+    signals.push(
+      ...partySignals({
+        leftName: proof.financialPayload.debtor.normalizedName,
+        rightName: expected.debtor.normalizedName,
+        leftAccount: proof.financialPayload.debtorAccount,
+        rightAccount: expected.debtorAccount,
+        exactDetail: "Proof payer matches invoice debtor.",
+        aliasDetail: "Proof payer is a known alias of the invoice debtor.",
+        accountDetail: "Proof payer account matches the invoice debtor account.",
+        similarDetail: "Proof payer name is similar to the invoice debtor.",
+        identityStore
+      })
+    );
   }
   return signals;
 }
@@ -158,22 +246,47 @@ function expectedBridgeQualifies(
   bank: BankStatementTransaction,
   proof: NormalizedPaymentProofRecord,
   expected: ExpectedPaymentRecord,
-  bpSignals: CandidateSignal[]
+  bpSignals: CandidateSignal[],
+  policy: ReconciliationPolicy
 ): boolean {
   const refs = bankReferenceSet(bank);
   const text = bankTextNormalized(bank);
   const expectedRef = expected.paymentReference.normalized;
   const proofRef = proof.financialPayload.reference.normalized;
   const expectedLinkedToBank = referenceLinked(refs, text, expectedRef);
-  const expectedLinkedToProof = expectedRef !== null && proofRef !== null && (expectedRef === proofRef || partialReferenceMatch(expectedRef, proofRef));
-  const expectedAmountMatchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expected.amountDue));
+  const expectedLinkedToProof =
+    expectedRef !== null && proofRef !== null && (expectedRef === proofRef || partialReferenceMatch(expectedRef, proofRef, policy));
+  const expectedAmountMatchesProof = proofComparableAmounts(proof).some((amount) =>
+    amountEqual(amount, expected.outstandingAmount ?? expected.amountDue)
+  );
   const proofBankIsPlausible = meetsThreshold(bpSignals);
 
-  if (expectedLinkedToBank) {
-    return expectedLinkedToProof || expectedAmountMatchesProof || proofBankIsPlausible;
-  }
-
+  if (expectedLinkedToBank) return expectedLinkedToProof || expectedAmountMatchesProof || proofBankIsPlausible;
   return expectedLinkedToProof && proofBankIsPlausible;
+}
+
+function amountForAllocation(expected: ExpectedPaymentRecord): MoneyAmount {
+  if (
+    expected.outstandingAmount &&
+    expected.outstandingAmount.currency === expected.amountDue.currency &&
+    (expected.reconciliationStatus === "PARTIALLY_MATCHED" || compareMoney(expected.outstandingAmount.value, expected.amountDue.value) === 0)
+  ) {
+    return expected.outstandingAmount;
+  }
+  return expected.amountDue;
+}
+
+function buildAllocations(expecteds: ExpectedPaymentRecord[], reason: AllocationReason): PaymentAllocation[] {
+  return expecteds.map((expected) => {
+    const amount = amountForAllocation(expected);
+    return {
+      expectedPaymentId: expected.expectedPaymentId,
+      invoiceNumber: expected.invoiceNumber,
+      appliedAmount: amount,
+      remainingAmount: { value: "0.00", currency: amount.currency },
+      reason
+    };
+  });
 }
 
 function makeCandidate(
@@ -185,21 +298,115 @@ function makeCandidate(
 ): MatchCandidate {
   return {
     candidateId,
+    candidateKind: expected ? "single_invoice" : proof ? "proof_only" : "bank_only",
     bankTransactionId: bank.internalTxId,
     ...(proof ? { proofId: proof.proofId } : {}),
-    ...(expected ? { expectedPaymentId: expected.expectedPaymentId } : {}),
+    ...(expected ? { expectedPaymentId: expected.expectedPaymentId, expectedPaymentIds: [expected.expectedPaymentId] } : {}),
     signals,
     bankTransaction: bank,
     ...(proof ? { proof } : {}),
-    ...(expected ? { expectedPayment: expected } : {})
+    ...(expected
+      ? {
+          expectedPayment: expected,
+          expectedPayments: [expected],
+          allocations: buildAllocations([expected], "single_invoice")
+        }
+      : {})
   };
+}
+
+function makeBatchCandidate(
+  candidateId: string,
+  bank: BankStatementTransaction,
+  proof: NormalizedPaymentProofRecord,
+  expecteds: ExpectedPaymentRecord[],
+  signals: CandidateSignal[],
+  reason: AllocationReason
+): MatchCandidate {
+  const first = expecteds[0]!;
+  return {
+    candidateId,
+    candidateKind: "batch_invoices",
+    bankTransactionId: bank.internalTxId,
+    proofId: proof.proofId,
+    expectedPaymentId: first.expectedPaymentId,
+    expectedPaymentIds: expecteds.map((expected) => expected.expectedPaymentId),
+    signals,
+    bankTransaction: bank,
+    proof,
+    expectedPayment: first,
+    expectedPayments: expecteds,
+    allocations: buildAllocations(expecteds, reason)
+  };
+}
+
+function normalizedInvoiceIdSet(proof: NormalizedPaymentProofRecord): Set<string> {
+  return new Set((proof.financialPayload.invoiceIds ?? []).map((id) => normalize_reference(id)).filter((id): id is string => id !== null));
+}
+
+function remittanceBatchExpecteds(proof: NormalizedPaymentProofRecord, expecteds: ExpectedPaymentRecord[]): ExpectedPaymentRecord[] {
+  const ids = normalizedInvoiceIdSet(proof);
+  if (ids.size < 2) return [];
+  return expecteds.filter((expected) => {
+    const refs = [expected.invoiceNumber, expected.paymentReference.raw, expected.paymentReference.normalized]
+      .map((value) => normalize_reference(value ?? null))
+      .filter((value): value is string => value !== null);
+    return refs.some((ref) => ids.has(ref));
+  });
+}
+
+function sumExpected(expecteds: ExpectedPaymentRecord[]): MoneyAmount | null {
+  const currency = expecteds[0] ? amountForAllocation(expecteds[0]).currency : null;
+  if (!currency || !expecteds.every((expected) => amountForAllocation(expected).currency === currency)) return null;
+  return { value: sumMoney(expecteds.map((expected) => amountForAllocation(expected).value)), currency };
+}
+
+function amountMatchesBankOrProof(sum: MoneyAmount, bank: BankStatementTransaction, proof: NormalizedPaymentProofRecord): boolean {
+  return amountEqual(sum, bank.amount) || amountEqual(sum, bank.sourceAmount) || proofComparableAmounts(proof).some((amount) => amountEqual(sum, amount));
+}
+
+function combinations<T>(items: T[], maxSize: number): T[][] {
+  const out: T[][] = [];
+  const walk = (start: number, picked: T[]) => {
+    if (picked.length > 1) out.push([...picked]);
+    if (picked.length >= maxSize) return;
+    for (let i = start; i < items.length; i += 1) {
+      picked.push(items[i]!);
+      walk(i + 1, picked);
+      picked.pop();
+    }
+  };
+  walk(0, []);
+  return out;
+}
+
+function subsetSumBatchExpecteds(
+  bank: BankStatementTransaction,
+  proof: NormalizedPaymentProofRecord,
+  expecteds: ExpectedPaymentRecord[],
+  policy: ReconciliationPolicy,
+  identityStore: CounterpartyIdentityStore
+): ExpectedPaymentRecord[] {
+  const debtor = proof.financialPayload.debtor.normalizedName ?? bank.debtorNormalizedName;
+  const group = expecteds
+    .filter(canReceivePayment)
+    .filter((expected) => (debtor ? exactNameMatch(expected.debtor.normalizedName, debtor) || identityStore.namesMatch(expected.debtor.normalizedName, debtor) : true))
+    .slice(0, policy.batch.maxInvoicesPerGroup);
+
+  for (const combo of combinations(group, policy.batch.maxInvoicesPerCandidate)) {
+    const sum = sumExpected(combo);
+    if (sum && amountMatchesBankOrProof(sum, bank, proof)) return combo;
+  }
+  return [];
 }
 
 export function generateBankAnchoredCandidates(input: {
   batch: NormalizedInputBatch;
   policy: ReconciliationPolicy;
+  counterpartyIdentityStore?: CounterpartyIdentityStore;
 }): ToolResult<CandidateSet> {
-  const { batch } = input;
+  const { batch, policy } = input;
+  const identityStore = input.counterpartyIdentityStore ?? new LocalCounterpartyIdentityStore();
   const candidatesByBankTx: Record<string, MatchCandidate[]> = {};
   const unmatchedBankTxIds: string[] = [];
 
@@ -212,14 +419,41 @@ export function generateBankAnchoredCandidates(input: {
     const perBank: MatchCandidate[] = [];
 
     for (const proof of proofs) {
-      const bpSignals = bankProofSignals(bank, proof);
+      const bpSignals = bankProofSignals(bank, proof, identityStore);
+      const openExpecteds = batch.expectedPayments.filter(canReceivePayment);
+      const remittanceExpecteds = remittanceBatchExpecteds(proof, openExpecteds);
+      if (remittanceExpecteds.length > 1) {
+        const sum = sumExpected(remittanceExpecteds);
+        if (sum && amountMatchesBankOrProof(sum, bank, proof)) {
+          candidateSeq += 1;
+          perBank.push(
+            makeBatchCandidate(`CAND-${String(candidateSeq).padStart(3, "0")}`, bank, proof, remittanceExpecteds, [
+              ...bpSignals,
+              { code: "EXACT_REFERENCE_MATCH", strength: "STRONG", detail: "Remittance advice lists the settled invoices." },
+              { code: "AMOUNT_MATCHES_EXPECTED", strength: "MEDIUM", detail: "Remittance invoice total matches settlement amount." },
+              { code: "NAME_MATCH", strength: "MEDIUM", detail: "Remittance invoices share the payer identity." }
+            ], "remittance_advice")
+          );
+          continue;
+        }
+      }
 
-      // An invoice attaches only on a *linking* signal (reference or amount).
-      // A shared customer name corroborates the score but must never, on its own,
-      // pair a proof with one of several same-customer invoices.
-      const linkedExpecteds = batch.expectedPayments
-        .map((expected) => ({ expected, signals: expectedLinkSignals(bank, proof, expected) }))
-        .filter(({ expected }) => expectedBridgeQualifies(bank, proof, expected, bpSignals));
+      const subsetExpecteds = subsetSumBatchExpecteds(bank, proof, openExpecteds, policy, identityStore);
+      if (subsetExpecteds.length > 1) {
+        candidateSeq += 1;
+        perBank.push(
+          makeBatchCandidate(`CAND-${String(candidateSeq).padStart(3, "0")}`, bank, proof, subsetExpecteds, [
+            ...bpSignals,
+            { code: "AMOUNT_MATCHES_EXPECTED", strength: "MEDIUM", detail: "Subset of open invoices sums to the settlement amount." },
+            { code: "NAME_MATCH", strength: "MEDIUM", detail: "Subset invoices share the payer identity." }
+          ], "subset_sum")
+        );
+        continue;
+      }
+
+      const linkedExpecteds = openExpecteds
+        .map((expected) => ({ expected, signals: expectedLinkSignals(bank, proof, expected, policy, identityStore) }))
+        .filter(({ expected }) => expectedBridgeQualifies(bank, proof, expected, bpSignals, policy));
 
       if (linkedExpecteds.length > 0) {
         for (const { expected, signals: expectedSignals } of linkedExpecteds) {
@@ -246,6 +480,6 @@ export function generateBankAnchoredCandidates(input: {
     ok: true,
     toolName: TOOL_NAME,
     data: { candidatesByBankTx, unmatchedBankTxIds },
-        summary: `Generated ${total} candidate(s) across ${settlementRows.length} bank settlement row(s); ${unmatchedBankTxIds.length} unmatched.`
+    summary: `Generated ${total} candidate(s) across ${settlementRows.length} bank settlement row(s); ${unmatchedBankTxIds.length} unmatched.`
   };
 }

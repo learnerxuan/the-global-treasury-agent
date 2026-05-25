@@ -9,7 +9,17 @@ export async function extractPdfText(bytes: Buffer): Promise<string> {
   const parser = new PDFParse({ data: bytes });
   try {
     const result = await parser.getText();
-    return result.text.trim();
+    const text = result.text.trim();
+    // If the PDF has no real text layer (scanned/image-only), fall back to OCR
+    if (text.length < 50) {
+      try {
+        const ocrText = await extractPdfOcrText(bytes);
+        if (ocrText.length > text.length) return ocrText;
+      } catch {
+        // OCR fallback failed; return whatever text we have
+      }
+    }
+    return text;
   } finally {
     await parser.destroy();
   }
@@ -31,9 +41,9 @@ export async function extractPdfOcrText(bytes: Buffer, firstPages = 2): Promise<
     for (const page of result.pages) {
       const imagePath = join(tempDir, `page-${page.pageNumber}.png`);
       await writeFile(imagePath, page.data);
-      const text = await extractImageText(imagePath);
-      if (text.trim().length > 0) {
-        texts.push(`-- OCR page ${page.pageNumber} --\n${text.trim()}`);
+      const ocrResult = await extractImageText(imagePath);
+      if (ocrResult.text.trim().length > 0) {
+        texts.push(`-- OCR page ${page.pageNumber} --\n${ocrResult.text.trim()}`);
       }
     }
 
