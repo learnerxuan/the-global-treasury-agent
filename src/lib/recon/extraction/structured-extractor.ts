@@ -193,7 +193,7 @@ export function createChutesStructuredExtractor(client: StructuredExtractionClie
         {
           role: "system",
           content:
-            "You are ReconPilot's extraction agent. Return only valid JSON. Do not normalize names or references. Do not match records. Do not invent missing values; use null and warnings."
+            "You are ReconPilot's extraction agent. Return only valid JSON. Do not normalize names or references. Do not match records. Do not invent missing values; use null. Only populate the 'warnings' array for critical unreadable text or severely damaged documents, NOT for standard fine-print disclosures or missing optional fees."
         },
         {
           role: "user",
@@ -211,7 +211,7 @@ export function createChutesStructuredExtractor(client: StructuredExtractionClie
             "Fill only the array for the current document role:",
             "- role invoice: fill invoices only; bankTransactions and paymentProofs must be [].",
         "- role bank_statement: fill bankTransactions only; invoices and paymentProofs must be []. For bank statements, amount is the final transaction amount shown by the bank. Fill creditDebitIndicator as CRDT for incoming credits/deposits and DBIT for outgoing debits/withdrawals/charges. If the narration contains FX and local receiver-bank fees, also fill sourceAmount, exchangeRateApplied, bankFeeDeducted, feeCurrency, netCreditAmount, referenceNo, ttNo, and remarks. Use uppercase 3-letter ISO currency codes.",
-            "- role payment_proof: fill paymentProofs only; invoices and bankTransactions must be []. If the proof shows upstream/intermediary fees before conversion, fill grossAmount, feeAmount, feeCurrency, and netAmount. Use uppercase 3-letter ISO currency codes.",
+            "- role payment_proof: fill paymentProofs only; invoices and bankTransactions must be []. The 'paidAmount' field is mandatory and must always be filled with the primary transaction amount. If the proof shows upstream/intermediary fees before conversion, optionally fill grossAmount, feeAmount, feeCurrency, and netAmount. Use uppercase 3-letter ISO currency codes. For payment status, explicitly look for status text like 'Completed', 'Successful', or 'Pending' (often in badges or headers).",
             "",
             "Return JSON with this exact shape:",
         '{"role":"invoice|bank_statement|payment_proof","selectedTool":"parse_pdf_text|parse_pdf_table|parse_csv_text|parse_spreadsheet|parse_image_ocr|manual_correction","confidence":0.0,"summary":"","invoices":[{"invoiceNumber":null,"customerName":null,"issueDate":null,"dueDate":null,"amountDue":{"value":null,"currency":null},"paymentReference":null}],"bankTransactions":[{"transactionDate":null,"valueDate":null,"description":null,"payerName":null,"amount":{"value":null,"currency":null},"creditDebitIndicator":"CRDT|DBIT|null","amountReceived":{"value":null,"currency":null},"sourceAmount":{"value":null,"currency":null},"exchangeRateApplied":null,"bankFeeDeducted":{"value":null,"currency":null},"feeCurrency":null,"netCreditAmount":{"value":null,"currency":null},"reference":null,"referenceNo":null,"ttNo":null,"remarks":null}],"paymentProofs":[{"payerName":null,"creditorName":null,"paymentDate":null,"paidAmount":{"value":null,"currency":null},"reference":null,"paymentStatus":null,"providerOrBankName":null,"exchangeRate":null,"grossAmount":{"value":null,"currency":null},"feeAmount":{"value":null,"currency":null},"feeCurrency":null,"netAmount":{"value":null,"currency":null}}],"warnings":[]}',
