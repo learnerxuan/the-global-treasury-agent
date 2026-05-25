@@ -242,44 +242,8 @@ async function parseStructuredExtractionWithRepair(
     // Step 2 failed — continue to LLM repair
   }
 
-  // Step 3: LLM-based repair (expensive, last resort)
-  const firstError = (() => {
-    try {
-      extractJsonObject(content);
-      return "Schema validation failed";
-    } catch (e) {
-      return e instanceof Error ? e.message : "Unknown JSON parse error";
-    }
-  })();
-
-  const repaired = await client.chat({
-    maxTokens: 3000,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You repair malformed JSON for ReconPilot. Return only valid JSON. Do not add explanation, markdown, or new fields."
-      },
-      {
-        role: "user",
-        content: [
-          "Repair this extraction response into valid JSON that matches the exact ReconPilot extraction schema.",
-          `The expected document role is ${expectedRole}; keep only that role's array populated and set the other record arrays to [].`,
-          `Original parse error: ${firstError}`,
-          "",
-          "Malformed response:",
-          content
-        ].join("\n")
-      }
-    ]
-  });
-
-  try {
-    return structuredDocumentExtractionSchema.parse(extractJsonObject(repaired));
-  } catch (repairError) {
-    const secondError = repairError instanceof Error ? repairError.message : "Unknown JSON parse error";
-    throw new Error(`Unable to parse extraction JSON after repair attempt. First error: ${firstError}. Repair error: ${secondError}`);
-  }
+  // Step 3: LLM-based repair removed to prevent rate limits
+  throw new Error("Unable to parse extraction JSON. Fallback to manual correction.");
 }
 
 // ─── Role-specific prompt builder ────────────────────────────────────────────
@@ -320,29 +284,46 @@ export function createChutesStructuredExtractor(client: StructuredExtractionClie
       };
     }
 
-    const content = await client.chat({
-      maxTokens: 2200,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are ReconPilot's extraction agent. Return only valid JSON. Do not normalize names or references. Do not match records. Do not invent missing values; use null. Only populate the 'warnings' array for critical unreadable text or severely damaged documents, NOT for standard fine-print disclosures or missing optional fees."
-        },
-        {
-          role: "user",
-          content: buildRoleSpecificUserMessage(input)
-        }
-      ]
-    });
+    const messages = [
+      {
+        role: "system",
+        content:
+          "You are ReconPilot's extraction agent. Return only valid JSON. Do not normalize names or references. Do not match records. Do not invent missing values; use null. Only populate the 'warnings' array for critical unreadable text or severely damaged documents, NOT for standard fine-print disclosures or missing optional fees."
+      },
+      {
+        role: "user",
+        content: buildRoleSpecificUserMessage(input)
+      }
+    ] as const;
 
-    const parsed = await parseStructuredExtractionWithRepair(client, content, input.role);
-    if (parsed.role !== input.role) {
-      return keepOnlyExpectedRoleRecords(
-        { ...parsed, role: input.role, warnings: [...parsed.warnings, `Model returned role ${parsed.role}; server expected ${input.role}.`] },
-        input.role
-      );
+    const maxParseAttempts = 2;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxParseAttempts; attempt++) {
+      try {
+        const content = await client.chat({
+          maxTokens: 2200,
+          messages: [...messages]
+        });
+
+        const parsed = await parseStructuredExtractionWithRepair(client, content, input.role);
+        if (parsed.role !== input.role) {
+          return keepOnlyExpectedRoleRecords(
+            { ...parsed, role: input.role, warnings: [...parsed.warnings, `Model returned role ${parsed.role}; server expected ${input.role}.`] },
+            input.role
+          );
+        }
+
+        return keepOnlyExpectedRoleRecords(parsed, input.role);
+      } catch (error) {
+        lastError = error;
+        // If it's a transient formatting issue, wait briefly and try the exact same prompt again
+        if (attempt < maxParseAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
     }
 
-    return keepOnlyExpectedRoleRecords(parsed, input.role);
+    throw lastError instanceof Error ? lastError : new Error("Unable to parse extraction JSON. Fallback to manual correction.");
   };
 }

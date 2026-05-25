@@ -73,7 +73,7 @@ export class ChutesClient {
         : readLocalEnvValue("CHUTES_MODEL") ?? "default:latency");
 
     const envAttempts = Number(readLocalEnvValue("LLM_MAX_ATTEMPTS"));
-    this.maxAttempts = Math.max(1, options.maxAttempts ?? (Number.isFinite(envAttempts) && envAttempts > 0 ? envAttempts : 4));
+    this.maxAttempts = Math.max(1, options.maxAttempts ?? (Number.isFinite(envAttempts) && envAttempts > 0 ? envAttempts : 6));
     this.retryBaseDelayMs = Math.max(0, options.retryBaseDelayMs ?? 2000);
   }
 
@@ -107,7 +107,7 @@ export class ChutesClient {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       let response: Response;
       const abortController = new AbortController();
-      const timeout = setTimeout(() => abortController.abort(), options.timeoutMs ?? 30_000);
+      const timeout = setTimeout(() => abortController.abort(), options.timeoutMs ?? 60_000);
       try {
         response = await fetch(`${this.baseUrl}/chat/completions`, {
           method: "POST",

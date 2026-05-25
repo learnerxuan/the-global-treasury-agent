@@ -829,7 +829,7 @@ async function extractStoredDocuments(
         toolObservations: [...document.stored.toolObservations, ...document.stored.warnings]
       });
       extractions.push(calibrateExtractionConfidence(extraction));
-      await sleep(1500);
+      await sleep(6000);
     } catch (error) {
       extractions.push({
         role: document.stored.role,
