@@ -77,7 +77,15 @@ function lowCriticalConfidence(candidate: MatchCandidate, policy: Reconciliation
   const ai = candidate.proof?.aiMetadata;
   if (!ai) return false;
   if (ai.overallConfidence < policy.confidenceFloor) return true;
+  const proofAmounts = [
+    candidate.proof?.financialPayload.paidAmount,
+    candidate.proof?.financialPayload.targetAmount,
+    candidate.proof?.financialPayload.sourceAmount,
+    candidate.proof?.financialPayload.netAmount
+  ];
+  const hasUsableProofAmount = proofAmounts.some((amount) => amount !== null && amount !== undefined);
   return CRITICAL_PROOF_FIELD_ALIASES.some((aliases) => {
+    if (aliases.includes("financialPayload.paidAmount.value") && hasUsableProofAmount) return false;
     const value = aliases.map((field) => ai.fieldConfidence[field]).find((confidence) => confidence !== undefined);
     return value !== undefined && value < policy.confidenceFloor;
   });
@@ -123,8 +131,8 @@ function buildHardReviewFlags(candidate: MatchCandidate, residual: AmountResidua
 
   // Settlement is proven by the matched bank credit (actual cash received) plus
   // explained money math — not by a status word on the customer's proof. So we
-  // deliberately do NOT gate on paymentStatus here. (Explicit RJCT/CANC proofs
-  // are already excluded upstream in generateBankAnchoredCandidates.)
+  const status = candidate.proof?.financialPayload.paymentStatus;
+  if (status === "PNDG" || status === "ACSP") flags.push("PROOF_NOT_SETTLED");
 
   if (residual.band === "NO_SCENARIO") flags.push("NO_FX_SCENARIO");
   if (residual.exceedsHardReviewThreshold && residual.band !== "NO_SCENARIO") flags.push("RESIDUAL_ABOVE_THRESHOLD");

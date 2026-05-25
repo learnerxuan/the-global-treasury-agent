@@ -438,7 +438,7 @@ describe("extractReconciliationDocuments", () => {
       feeAmount: { value: "0.25", currency: "USD" },
       feeCurrency: "USD",
       netAmount: { value: "9.75", currency: "USD" },
-      sourceAmount: { value: "9.75", currency: "USD" }
+      sourceAmount: { value: "10.00", currency: "USD" }
     });
 
     const storedInvoice = await readFile(result.documents.invoice[0]!.storageRef.uri, "utf8");

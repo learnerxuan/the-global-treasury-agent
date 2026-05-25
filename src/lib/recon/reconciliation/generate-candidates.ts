@@ -56,6 +56,17 @@ function amountEqual(a: MoneyAmount | null | undefined, b: MoneyAmount | null | 
   return a != null && b != null && a.currency === b.currency && compareMoney(a.value, b.value) === 0;
 }
 
+function proofComparableAmounts(proof: NormalizedPaymentProofRecord | null): Array<MoneyAmount | null | undefined> {
+  if (!proof) return [];
+  return [
+    proof.financialPayload.paidAmount,
+    proof.financialPayload.targetAmount,
+    proof.financialPayload.sourceAmount,
+    proof.financialPayload.netAmount,
+    proof.financialPayload.feeAmount
+  ];
+}
+
 function nameMatch(a: string | null, b: string | null): boolean {
   return a !== null && b !== null && a === b;
 }
@@ -77,12 +88,7 @@ function bankProofSignals(bank: BankStatementTransaction, proof: NormalizedPayme
   // The bank credit is local currency; cross-border proofs are foreign currency.
   // Match against bank.amount (local) OR bank.sourceAmount (the foreign amount the
   // bank itself recorded for the incoming remittance).
-  const proofAmounts = [
-    proof.financialPayload.paidAmount,
-    proof.financialPayload.targetAmount,
-    proof.financialPayload.sourceAmount,
-    proof.financialPayload.netAmount
-  ];
+  const proofAmounts = proofComparableAmounts(proof);
   const matchesLocal = proofAmounts.some((amount) => amountEqual(amount, bank.amount));
   const matchesSource = proofAmounts.some((amount) => amountEqual(amount, bank.sourceAmount));
   if (matchesLocal || matchesSource) {
@@ -123,7 +129,7 @@ function expectedLinkSignals(
     // derived) — never against the bank's machine reference.
     signals.push({ code: "PARTIAL_REFERENCE_MATCH", strength: "MEDIUM", detail: `Expected payment ${expectedRef} shares a reference core with proof ${proofRef}.` });
   }
-  const matchesProof = proof !== null && amountEqual(proof.financialPayload.paidAmount, expected.amountDue);
+  const matchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expected.amountDue));
   const matchesBankSource = amountEqual(expected.amountDue, bank.sourceAmount);
   if (matchesProof || matchesBankSource) {
     signals.push({

@@ -116,9 +116,9 @@ describe("scoreCandidate", () => {
       {
         overallConfidence: 0.95,
         fieldConfidence: {
-          "financialPayload.paidAmount.value": 0.6,
+          "financialPayload.paidAmount.value": 0.95,
           "financialPayload.reference.raw": 0.95,
-          "financialPayload.paymentDate": 0.9
+          "financialPayload.paymentDate": 0.6
         }
       }
     );
@@ -127,11 +127,28 @@ describe("scoreCandidate", () => {
     expect(scored.data.hardReviewFlags).toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
   });
 
-  it("does not block on proof payment status (settlement is proven by the matched bank credit)", () => {
+  it("does not flag low paidAmount confidence when another proof amount is usable", () => {
+    const candidate = makeCandidate(
+      { paidAmount: null, netAmount: { value: "250.00", currency: "USD" } },
+      {
+        overallConfidence: 0.95,
+        fieldConfidence: {
+          "financialPayload.paidAmount.value": 0.6,
+          "financialPayload.reference.raw": 0.95,
+          "financialPayload.paymentDate": 0.9
+        }
+      }
+    );
+    const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
+    if (!scored.ok) return;
+    expect(scored.data.hardReviewFlags).not.toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
+  });
+
+  it("flags unsettled proof payment status for human review", () => {
     const candidate = makeCandidate({ paymentStatus: "PNDG" });
     const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
     if (!scored.ok) return;
-    expect(scored.data.hardReviewFlags).not.toContain("PROOF_NOT_SETTLED");
+    expect(scored.data.hardReviewFlags).toContain("PROOF_NOT_SETTLED");
   });
 
   it("flags a residual above the hard threshold", () => {

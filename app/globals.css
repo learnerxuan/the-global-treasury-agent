@@ -766,6 +766,11 @@ p {
   font-weight: 600;
 }
 
+.action-confirm.error {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
 /* ── Overview tab ──────────────────────────────────────────────────────── */
 
 .field-block + .field-block {

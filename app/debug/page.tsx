@@ -82,6 +82,8 @@ export default function DebugPage() {
       }
       sessionStorage.removeItem("reconpilot:results");
       setResults({});
+      setRuns([]);
+      setSelectedJson("");
       setMessage("Local runtime data cleared.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to clear runtime data.");

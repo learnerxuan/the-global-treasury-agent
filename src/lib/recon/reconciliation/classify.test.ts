@@ -97,4 +97,14 @@ describe("classifyMatch", () => {
     if (!result.ok) return;
     expect(result.data.status).toBe("UNMATCHED");
   });
+
+  it("routes plausible but risky low-mid score cases to NEEDS_REVIEW", () => {
+    const result = classifyMatch({
+      scoredCandidates: [scored(48, { flags: ["RESIDUAL_ABOVE_THRESHOLD"] })],
+      competition: NO_COMPETITION,
+      policy: DEFAULT_POLICY
+    });
+    if (!result.ok) return;
+    expect(result.data.status).toBe("NEEDS_REVIEW");
+  });
 });

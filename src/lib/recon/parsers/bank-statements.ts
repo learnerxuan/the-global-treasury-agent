@@ -89,8 +89,28 @@ function mapColumns(headers: string[]): { columnMap: ColumnMap; warnings: Warnin
 type IsoCurrency = string;
 type ParsedMoney = { value: string; currency: IsoCurrency };
 
+const ISO_CURRENCY_WHITELIST = new Set([
+  "MYR",
+  "USD",
+  "EUR",
+  "GBP",
+  "AUD",
+  "SGD",
+  "JPY",
+  "CNY",
+  "HKD",
+  "THB",
+  "IDR",
+  "PHP",
+  "VND",
+  "INR",
+  "CAD",
+  "NZD",
+  "CHF"
+]);
+
 function isIsoCurrencyCode(value: string | null | undefined): value is IsoCurrency {
-  return Boolean(value && /^[A-Z]{3}$/.test(value));
+  return Boolean(value && ISO_CURRENCY_WHITELIST.has(value.toUpperCase()));
 }
 
 function mapDirection(raw: string): "CRDT" | "DBIT" | null {
@@ -171,6 +191,24 @@ function extractTransferReference(text: string): string | null {
   return match ? match[0].toUpperCase() : null;
 }
 
+function inferDebtorNameFromDescription(text: string): string | null {
+  const currencyBoundary = String.raw`(?:USD|EUR|GBP|AUD|SGD|MYR)(?:\s*\d|\b)`;
+  const patterns = [
+    new RegExp(String.raw`\bWISE\s+PAYOUT\s+(.+?)(?=\s+MIXED\b|\s+${currencyBoundary}|\s+INV\b|\s+RP\b|\s+REF\b|$)`, "i"),
+    new RegExp(String.raw`\b(?:TT\s+INWARD\s+FROM|FOREIGN\s+TT\s+FROM|REMITTANCE\s+CREDIT|BANK-IN\s+CREDIT|GIRO\s+CREDIT|PAYNOW\s+CREDIT|IBG\s+CREDIT|PAYPAL\s+WITHDRAWAL)\s+(.+?)(?=\s+${currencyBoundary}|\s+REF\b|\s+MAY\b|\s+ID\b|\s+SUBSCRIPTION\b|\s+SETTLEMENT\b|\s+\d|$)`, "i"),
+    new RegExp(String.raw`\bSWIFT\s+INWARD\s+TT\s+(.+?)(?=\s+${currencyBoundary}|\s+LESS\b|\s+REF\b|$)`, "i"),
+    new RegExp(String.raw`\bCARD\s+SETTLEMENT\s+STRIPE\s+(.+?)(?=\s+${currencyBoundary}|\s+NET\b|\s+REF\b|$)`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const raw = match?.[1]?.replace(/[\/]+/g, " ").replace(/\s+/g, " ").trim();
+    if (raw && raw.length >= 3) return raw;
+  }
+
+  return null;
+}
+
 function deriveAmountReceived(
   sourceAmount: ParsedMoney | null,
   exchangeRateApplied: string | null,
@@ -231,6 +269,7 @@ function buildTextRecord(input: {
   const invoiceFromDesc = extractInvoiceNumber(input.description);
   const transferReferenceFromDesc = extractTransferReference(input.description);
   const reference = input.reference || transferReferenceFromDesc || invoiceFromDesc || null;
+  const debtorName = inferDebtorNameFromDescription(input.description);
 
   return {
     schemaVersion: "1.0.0",
@@ -252,8 +291,8 @@ function buildTextRecord(input: {
     normalizedReference: normalize_reference(reference ?? input.description),
     endToEndId: null,
     txId: transferReferenceFromDesc,
-    debtorName: null,
-    debtorNormalizedName: null,
+    debtorName,
+    debtorNormalizedName: normalize_party_name(debtorName),
     debtorAccount: null,
     creditorName: null,
     creditorNormalizedName: null,
@@ -349,7 +388,7 @@ function buildRecord(
   }
 
   // Party names
-  const rawDebtorName   = get("debtorName");
+  const rawDebtorName   = get("debtorName") || (rawDescription ? inferDebtorNameFromDescription(rawDescription) ?? "" : "");
   const rawCreditorName = get("creditorName");
 
   // Remittance — extract INV-XXXX from description

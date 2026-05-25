@@ -61,12 +61,11 @@ describe("runReconciliationOrchestrator", () => {
     expect(review?.options?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("does not gate on proof payment status — settlement is proven by the matched bank credit", () => {
+  it("routes pending proof status to human review even when money math matches", () => {
     const output = runReconciliationOrchestrator(pendingProofBatch, { now: FIXED_NOW });
     const result = output.results[0]!;
-    // A matched bank credit + explained money math is the settlement evidence;
-    // the proof's status word (here PNDG) must not add a hard review flag.
-    expect(result.hardReviewFlags).not.toContain("PROOF_NOT_SETTLED");
+    expect(result.status).toBe("NEEDS_REVIEW");
+    expect(result.hardReviewFlags).toContain("PROOF_NOT_SETTLED");
   });
 
   it("emits a timeline with tool calls and observed results", () => {

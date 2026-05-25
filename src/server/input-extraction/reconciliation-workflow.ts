@@ -555,9 +555,9 @@ function buildBankTransactions(extraction: StructuredDocumentExtraction, stored:
 function mapPaymentStatus(status: string | null): PaymentProofExtractionOutput["financialPayload"]["paymentStatus"] {
   const normalized = status?.trim().toUpperCase();
   if (!normalized) return "UNKNOWN";
-  if (["ACSC", "COMPLETED", "COMPLETE", "PAID", "SETTLED", "SUCCESS", "SUCCESSFUL"].includes(normalized)) return "ACSC";
-  if (["ACSP", "PROCESSING"].includes(normalized)) return "ACSP";
-  if (["PNDG", "PENDING", "SCHEDULED"].includes(normalized)) return "PNDG";
+  if (["ACSC", "COMPLETED", "COMPLETE", "PAID", "SETTLED", "SUCCESS", "SUCCESSFUL", "TRANSFER COMPLETED", "DEPOSIT ACKNOWLEDGED"].includes(normalized)) return "ACSC";
+  if (["ACSP", "PROCESSING", "IN PROCESS", "IN PROGRESS"].includes(normalized)) return "ACSP";
+  if (["PNDG", "PENDING", "SCHEDULED", "PENDING RELEASE", "AWAITING RELEASE", "HELD"].includes(normalized)) return "PNDG";
   if (["RJCT", "REJECTED", "FAILED", "FAILURE"].includes(normalized)) return "RJCT";
   if (["CANC", "CANCELLED", "CANCELED"].includes(normalized)) return "CANC";
   return "UNKNOWN";
@@ -581,10 +581,11 @@ function parseExchangeRate(rate: string | null): PaymentProofExtractionOutput["f
 function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, stored: StoredDocument): PaymentProofExtractionOutput[] {
   const source = sourceFromTool(extraction.selectedTool);
   return extraction.paymentProofs.map((proof, index) => {
-    const paidAmount = toMoneyAmount(proof.paidAmount.value, proof.paidAmount.currency, "MYR");
-    const grossAmount = extractedMoneyToAmount(proof.grossAmount, paidAmount?.currency ?? "USD");
-    const feeAmount = extractedMoneyToAmount(proof.feeAmount, paidAmount?.currency ?? "USD");
-    const netAmount = extractedMoneyToAmount(proof.netAmount, paidAmount?.currency ?? "USD");
+    const explicitPaidAmount = toMoneyAmount(proof.paidAmount.value, proof.paidAmount.currency, "MYR");
+    const grossAmount = extractedMoneyToAmount(proof.grossAmount, explicitPaidAmount?.currency ?? "USD");
+    const feeAmount = extractedMoneyToAmount(proof.feeAmount, explicitPaidAmount?.currency ?? "USD");
+    const netAmount = extractedMoneyToAmount(proof.netAmount, explicitPaidAmount?.currency ?? grossAmount?.currency ?? "USD");
+    const paidAmount = explicitPaidAmount ?? netAmount ?? grossAmount;
     const feeCurrency = feeAmount?.currency ?? (proof.feeCurrency ? toCurrency(proof.feeCurrency, paidAmount?.currency ?? "USD") : null);
     const paymentStatus = mapPaymentStatus(proof.paymentStatus);
     const reference = proof.reference;
@@ -629,7 +630,7 @@ function buildPaymentProofExtractions(extraction: StructuredDocumentExtraction, 
         feeAmount,
         feeCurrency,
         netAmount,
-        sourceAmount: netAmount ?? grossAmount ?? paidAmount,
+        sourceAmount: grossAmount ?? netAmount ?? paidAmount,
         targetAmount: null,
         exchangeRateInformation: parseExchangeRate(proof.exchangeRate),
         remittanceInformation: {

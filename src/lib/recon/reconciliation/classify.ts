@@ -58,7 +58,11 @@ export function classifyMatch(input: {
   let status = scoreTier(selected.score, policy);
   const hasHardConcern = hardReviewFlags.length > 0 || competition.hasCompetition;
   if (hasHardConcern) {
-    status = BY_RANK[Math.min(RANK[status], RANK.NEEDS_REVIEW)]!;
+    if (status === "UNMATCHED" && selected.score >= 45) {
+      status = "NEEDS_REVIEW";
+    } else {
+      status = BY_RANK[Math.min(RANK[status], RANK.NEEDS_REVIEW)]!;
+    }
   }
 
   return {

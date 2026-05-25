@@ -250,4 +250,18 @@ describe("parseBankStatementText", () => {
       referenceNo: "88291"
     });
   });
+
+  it("does not treat narration words like REF or MAY as currencies", () => {
+    const { records } = parseBankStatementText(TEXT_LAYER_STATEMENT_WITH_RUNNING_BALANCE, "bank_pdf", "MYR_MAIN");
+    const euronext = records.find((record) => record.referenceNo === "RM-552901");
+    expect(euronext?.sourceAmount).toEqual({ value: "8000", currency: "EUR" });
+  });
+
+  it("infers debtor names from common inward-remittance descriptions", () => {
+    const { records } = parseBankStatementText(TEXT_LAYER_STATEMENT_WITH_RUNNING_BALANCE, "bank_pdf", "MYR_MAIN");
+    const euronext = records.find((record) => record.referenceNo === "RM-552901");
+    const pacific = records.find((record) => record.referenceNo === "RCN1010");
+    expect(euronext?.debtorNormalizedName).toBe("EURONEXT RETAIL");
+    expect(pacific?.debtorNormalizedName).toBe("PACIFIC CLOUD");
+  });
 });

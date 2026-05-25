@@ -58,6 +58,8 @@ export function ReconciliationDetailModal({
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [actionConfirm, setActionConfirm] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -73,6 +75,66 @@ export function ReconciliationDetailModal({
   const proof = findProof(run);
   const bank = findBank(run);
   const meta = statusMeta(run.status);
+
+  function actionCode(label: string): string {
+    switch (label) {
+      case "View Report":
+        return "VIEW_REPORT";
+      case "Approve Match":
+      case "Approve with Note":
+        return "APPROVE_MATCH";
+      case "Reject":
+      case "Reject Match":
+        return "REJECT_MATCH";
+      case "Request More Info":
+      case "Request More Proof":
+        return "REQUEST_MORE_INFO";
+      case "Mark as Unresolved":
+        return "MARK_UNRESOLVED";
+      case "Upload Missing Evidence":
+        return "UPLOAD_MISSING_EVIDENCE";
+      case "Create Discrepancy Note":
+        return "CREATE_DISCREPANCY_NOTE";
+      default:
+        return "REQUEST_MORE_INFO";
+    }
+  }
+
+  async function handleAction(label: string) {
+    setActionConfirm(null);
+    setActionError(null);
+
+    if (label === "View Report") {
+      setTab("artifacts");
+      setActionConfirm("Report opened in the Artifacts tab.");
+      return;
+    }
+
+    setActionBusy(label);
+    try {
+      const response = await fetch("/api/reconciliation/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: run.runId,
+          proofId: run.proofId,
+          invoiceLabel: row.invoiceLabel,
+          action: actionCode(label),
+          note: `${label} selected from reconciliation detail modal.`
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setActionError(body.error ?? "Unable to save action.");
+        return;
+      }
+      setActionConfirm(`${label} saved to the local audit log for ${row.invoiceLabel}.`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Unable to save action.");
+    } finally {
+      setActionBusy(null);
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
@@ -408,20 +470,24 @@ export function ReconciliationDetailModal({
         </div>
 
         <div className="modal-foot">
-          {actionConfirm ? (
-            <span className="action-confirm">{actionConfirm}</span>
-          ) : (
-            ACTIONS[run.status].map((label) => (
-              <button
-                key={label}
-                type="button"
-                className={label === "View Report" || label.startsWith("Approve") ? "primary-button" : "secondary-button"}
-                onClick={() => setActionConfirm(`${label} — recorded for ${row.invoiceLabel}.`)}
-              >
-                {label}
-              </button>
-            ))
-          )}
+          {actionConfirm ? <span className="action-confirm">{actionConfirm}</span> : null}
+          {actionError ? <span className="action-confirm error">{actionError}</span> : null}
+          {tab !== "overview" ? (
+            <button type="button" className="secondary-button" onClick={() => setTab("overview")}>
+              Back to Overview
+            </button>
+          ) : null}
+          {ACTIONS[run.status].map((label) => (
+            <button
+              key={label}
+              type="button"
+              className={label === "View Report" || label.startsWith("Approve") ? "primary-button" : "secondary-button"}
+              onClick={() => void handleAction(label)}
+              disabled={actionBusy !== null}
+            >
+              {actionBusy === label ? "Saving..." : label}
+            </button>
+          ))}
         </div>
       </div>
     </div>
