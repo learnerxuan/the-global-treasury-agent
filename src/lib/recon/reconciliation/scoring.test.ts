@@ -146,6 +146,28 @@ describe("scoreCandidate", () => {
     expect(scored.data.hardReviewFlags).toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
   });
 
+  it("does not flag a missing creditor name (the creditor is the SME itself, not match evidence)", () => {
+    const candidate = makeCandidate(
+      {},
+      {
+        overallConfidence: 0.95,
+        fieldConfidence: {
+          "financialPayload.paidAmount.value": 0.95,
+          "financialPayload.reference.raw": 0.95,
+          "financialPayload.paymentDate": 0.95,
+          "financialPayload.debtor.name": 0.95,
+          // Creditor not extracted from the payment screenshot — must NOT block.
+          "financialPayload.creditor.name": 0,
+          "financialPayload.paymentStatus": 0.95
+        }
+      }
+    );
+    const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
+    if (!scored.ok) return;
+    expect(scored.data.hardReviewFlags).not.toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
+    expect(scored.data.evidenceTrust.criticalFieldsChecked).not.toContain("financialPayload.creditor.name");
+  });
+
   it("does not flag low paidAmount confidence when another proof amount is usable", () => {
     const candidate = makeCandidate(
       { paidAmount: null, netAmount: { value: "250.00", currency: "USD" } },

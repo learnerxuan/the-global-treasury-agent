@@ -493,7 +493,8 @@ describe("enterprise reconciliation upgrades", () => {
         overallConfidence: 0.95,
         fieldConfidence: {
           ...batch.paymentProofs[0]!.aiMetadata.fieldConfidence,
-          "creditor.rawName": 0.4
+          // Debtor (payer) identity IS a critical field — low confidence here must gate.
+          "debtor.rawName": 0.4
         }
       }
     };
@@ -502,7 +503,28 @@ describe("enterprise reconciliation upgrades", () => {
     const result = output.results[0]!;
     expect(result.status).toBe("NEEDS_REVIEW");
     expect(result.hardReviewFlags).toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
-    expect(result.evidenceTrust?.issues.some((issue) => issue.field === "financialPayload.creditor.name")).toBe(true);
+    expect(result.evidenceTrust?.issues.some((issue) => issue.field === "financialPayload.debtor.name")).toBe(true);
+  });
+
+  it("does NOT block auto-match when only the creditor name is low confidence", () => {
+    const batch = batchOf({ expected: {}, proof: {}, bank: {} });
+    batch.paymentProofs[0] = {
+      ...batch.paymentProofs[0]!,
+      aiMetadata: {
+        ...batch.paymentProofs[0]!.aiMetadata,
+        overallConfidence: 0.95,
+        fieldConfidence: {
+          ...batch.paymentProofs[0]!.aiMetadata.fieldConfidence,
+          // The creditor on a proof is the SME itself — never a match blocker.
+          "creditor.rawName": 0
+        }
+      }
+    };
+
+    const output = runReconciliationOrchestrator(batch);
+    const result = output.results[0]!;
+    expect(result.status).toBe("AUTO_MATCHED");
+    expect(result.hardReviewFlags).not.toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
   });
 
   it("returns UI-ready audit and review payloads on every result", () => {

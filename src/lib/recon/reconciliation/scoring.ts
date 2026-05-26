@@ -18,13 +18,19 @@ const SCORE_TOOL = "scoreCandidate";
 const COMPETITION_TOOL = "detectCompetingCandidates";
 
 // Proof fields whose low confidence must block an auto-match.
+//
+// NOTE: creditor.name is deliberately NOT critical. On a payment proof the
+// creditor is the SME itself (our own company, the payee), which is often
+// absent from a payment screenshot and is irrelevant to proving the match —
+// the match is anchored by the invoice reference, the actual bank credit, and
+// the amount/FX reconciliation. The payer identity that matters is the DEBTOR,
+// which remains gated below.
 const CRITICAL_PROOF_FIELD_ALIASES = [
   ["financialPayload.paidAmount.value", "paidAmount.value"],
   ["financialPayload.paidAmount.currency", "paidAmount.currency"],
   ["financialPayload.reference.raw", "reference.raw"],
   ["financialPayload.paymentDate", "paymentDate"],
   ["financialPayload.debtor.name", "financialPayload.debtor.rawName", "debtor.name", "debtor.rawName"],
-  ["financialPayload.creditor.name", "financialPayload.creditor.rawName", "creditor.name", "creditor.rawName"],
   ["financialPayload.paymentStatus", "paymentStatus", "rawPaymentStatus"]
 ];
 
