@@ -132,12 +132,12 @@ http://localhost:3000
 
 ### 5. Use the reconciliation workflow
 
-1. Upload invoice files in the Invoices area and run extraction.
-2. Upload bank statement files in the Bank Statements area and run extraction.
-3. Upload payment proof files in the Payment Proofs area and run extraction.
-4. Payment proof extraction triggers reconciliation automatically.
-5. Review the Reconciliation Results table.
-6. Open a result row to inspect overview data, evidence, FX reasoning, timeline, trust and audit details, and generated artifacts.
+1. Upload invoice files in the **Invoices** panel and run extraction.
+2. Upload the bank statement in the **Bank Statements** panel and run extraction.
+3. Upload payment proofs in the **Payment Proofs** panel and run extraction.
+4. Uploading a payment proof triggers reconciliation automatically.
+5. Review the **Reconciliation Results** table.
+6. Click a result row to inspect Overview, Evidence, FX Reasoning, Agent Timeline, Trust & Audit, and Artifacts.
 7. Use `/debug` to inspect generated runtime JSON paths and clear local demo data.
 
 ## Available Scripts
@@ -161,6 +161,7 @@ node .\node_modules\next\dist\bin\next build
 ## Runtime Data
 
 The app writes local runtime artifacts under:
+(Use the dashboard/debug clear action before rerunning a full demo dataset.)
 
 ```text
 runtime/
