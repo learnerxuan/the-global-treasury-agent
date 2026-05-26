@@ -254,121 +254,43 @@ export default function DashboardPage() {
         onRescan={rescan}
         rescanning={rescanning}
       />
-
-      <section className="ops-hero" aria-label="Enterprise reconciliation status">
-        <div className="ops-copy">
-          <span className="ops-kicker">Enterprise agent workspace</span>
-          <h2>Reconcile cross-border cash with evidence, FX reasoning, and audit gates in one view.</h2>
-          <p>
-            Upload source documents, let the extraction and reconciliation agents build candidate matches, then resolve
-            only the cases blocked by policy, trust, or money-math risk.
-          </p>
-        </div>
-        <div className="ops-grid" aria-label="Enterprise safeguards">
-          <div className="ops-stat">
-            <span>Policy</span>
-            <strong>{latestPolicy}</strong>
+      <section className="workspace-main" aria-label="Reconciliation workspace">
+        <div className="section-title">
+          <div>
+            <p className="eyebrow">Evidence intake</p>
+            <h2>Upload source documents</h2>
           </div>
-          <div className="ops-stat">
-            <span>Batch matches</span>
-            <strong className="num">{enterpriseSignals.batchMatches}</strong>
-          </div>
-          <div className="ops-stat">
-            <span>BNM FX cases</span>
-            <strong className="num">{enterpriseSignals.liveFx}</strong>
-          </div>
-          <div className="ops-stat warn">
-            <span>Review blockers</span>
-            <strong className="num">{enterpriseSignals.hardFlags + enterpriseSignals.trustIssues}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section className="workspace-grid" aria-label="Reconciliation workspace">
-        <div className="workspace-main">
-          <div className="section-title">
-            <div>
-              <p className="eyebrow">Evidence intake</p>
-              <h2>Upload source documents</h2>
-            </div>
-            <span className="hint">Invoices, bank rows, and payment proofs stay in the persisted waiting queue.</span>
-          </div>
-
-          <section className="upload-strip" aria-label="Upload evidence">
-            {CARDS.map((card) => (
-              <UploadCard
-                key={card.key}
-                role={card.role}
-                title={card.title}
-                files={files[card.key]}
-                status={statuses[card.key]}
-                error={errors[card.key]}
-                notice={notices[card.key]}
-                storedWaiting={storedFor(card.key)}
-                latestRun={card.key === "paymentProofs" ? latestRun : null}
-                onFilesSelected={(selected) => setFiles((current) => ({ ...current, [card.key]: selected }))}
-                onSubmit={(event) => submitUpload(event, card)}
-              />
-            ))}
-          </section>
-
-          <MetricsStrip metrics={metrics} />
-
-          <ReconciliationResultsTable
-            rows={rows}
-            state={tableState}
-            errorMessage={errors.paymentProofs}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            onOpenRow={setOpenRow}
-          />
+          <span className="hint">Invoices, bank rows, and payment proofs stay in the persisted waiting queue.</span>
         </div>
 
-        <aside className="agent-rail" aria-label="Agent activity and review context">
-          <div className="rail-card rail-card-primary">
-            <span className="eyebrow">Review command</span>
-            <h3>{latestQuestion ?? "No active blocker"}</h3>
-            <p>
-              {latestRun
-                ? latestRun.nextAction
-                : "Run a payment proof after loading invoices and bank statements to populate the human review queue."}
-            </p>
-          </div>
+        <section className="upload-strip" aria-label="Upload evidence">
+          {CARDS.map((card) => (
+            <UploadCard
+              key={card.key}
+              role={card.role}
+              title={card.title}
+              files={files[card.key]}
+              status={statuses[card.key]}
+              error={errors[card.key]}
+              notice={notices[card.key]}
+              storedWaiting={storedFor(card.key)}
+              latestRun={card.key === "paymentProofs" ? latestRun : null}
+              onFilesSelected={(selected) => setFiles((current) => ({ ...current, [card.key]: selected }))}
+              onSubmit={(event) => submitUpload(event, card)}
+            />
+          ))}
+        </section>
 
-          <div className="rail-card">
-            <div className="rail-head">
-              <span className="eyebrow">Agent timeline</span>
-              <span className="num">{latestTimeline.length} events</span>
-            </div>
-            {latestTimeline.length > 0 ? (
-              <div className="rail-timeline">
-                {latestTimeline.map((event) => (
-                  <div className="rail-event" key={`${event.step}-${event.timestamp}`}>
-                    <span className="rail-dot" aria-hidden="true" />
-                    <div>
-                      <strong>{event.actor}</strong>
-                      <span>{event.action}</span>
-                      {event.resultSummary ? <p>{event.resultSummary}</p> : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="rail-empty">Agent activity appears here while extraction, FX checks, and scoring run.</p>
-            )}
-          </div>
+        <MetricsStrip metrics={metrics} />
 
-          <div className="rail-card compact">
-            <span className="eyebrow">Guide coverage</span>
-            <div className="coverage-list">
-              <span>Safety gates</span>
-              <span>FX provider trace</span>
-              <span>Allocation ledger</span>
-              <span>Evidence trust</span>
-              <span>Audit payload</span>
-            </div>
-          </div>
-        </aside>
+        <ReconciliationResultsTable
+          rows={rows}
+          state={tableState}
+          errorMessage={errors.paymentProofs}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          onOpenRow={setOpenRow}
+        />
       </section>
 
       {openRow ? <ReconciliationDetailModal row={openRow} onClose={() => setOpenRow(null)} /> : null}

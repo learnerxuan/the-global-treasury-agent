@@ -12,7 +12,7 @@ type AppHeaderProps = {
 export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onRescan, rescanning }: AppHeaderProps) {
   return (
     <header className="app-header">
-      <div className="brand">
+      <Link className="brand" href="/landing">
         <span className="mark" aria-hidden="true">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 17l5-5 4 4 7-8" />
@@ -23,9 +23,9 @@ export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onR
         <div>
           <h1>ReconPilot</h1>
           <p className="tagline">Cross-border reconciliation workspace</p>
-          <p className="subtagline">AI extracts evidence. Code does money math. Humans approve risky cases.</p>
         </div>
-      </div>
+      </Link>
+      <p className="header-tagline">AI extracts evidence. Code does money math. Humans approve risky cases.</p>
       <div className="header-actions">
         {resetMessage ? (
           <span className={`reset-message ${resetError ? "error" : ""}`}>{resetMessage}</span>
@@ -34,10 +34,34 @@ export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onR
           Debug
         </Link>
         <button className="secondary-button" type="button" onClick={onRescan} disabled={rescanning}>
-          {rescanning ? "Re-running…" : "Re-run reconciliation"}
+          {rescanning ? (
+            "Re-running…"
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              </svg>
+              Re-run reconciliation
+            </>
+          )}
         </button>
         <button className="secondary-button" type="button" onClick={onClearDemo} disabled={clearing}>
-          {clearing ? "Clearing…" : "Clear Demo Data"}
+          {clearing ? (
+            "Clearing…"
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14H6L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4h6v2" />
+              </svg>
+              Clear Demo Data
+            </>
+          )}
         </button>
       </div>
     </header>

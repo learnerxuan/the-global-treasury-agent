@@ -353,7 +353,7 @@ export function ReconciliationDetailModal({
                 <div className="evidence-col">
                   <h4>Payment Proof</h4>
                   {proof ? (
-                    <dl>
+                    <dl>       
                       <div>
                         <dt>Payer</dt>
                         <dd>{proof.financialPayload.debtor.name ?? "—"}</dd>
@@ -828,8 +828,8 @@ export function ReconciliationDetailModal({
               ) : null}
 
               {!run.outputPaths.reconciliationReportPath &&
-              !run.outputPaths.discrepancySummaryPath &&
-              !run.outputPaths.mockNotificationPath ? (
+                !run.outputPaths.discrepancySummaryPath &&
+                !run.outputPaths.mockNotificationPath ? (
                 <p className="evidence-empty">No artifacts were generated for this run.</p>
               ) : null}
             </>

@@ -91,7 +91,10 @@ export function UploadCard({
         <div className="file-summary">
           <ul>
             {files.map((file) => (
-              <li key={`${file.name}-${file.size}`}>{file.name}</li>
+              <li key={`${file.name}-${file.size}`}>
+                <span className="file-check" aria-hidden="true">✓</span>
+                {file.name}
+              </li>
             ))}
           </ul>
         </div>
@@ -105,26 +108,16 @@ export function UploadCard({
 
       {notice ? <div className="card-notice">{notice}</div> : null}
 
-      {latestRun ? (
-        <div className="last-recon">
-          <span className="lr-label">Last reconciliation</span>
-          <span className="lr-body">
-            <StatusChip status={latestRun.status} />
-            <span>
-              {latestRun.outputPaths.reconciliationReportPath
-                ? "Report generated"
-                : latestRun.outputPaths.discrepancySummaryPath
-                  ? "Discrepancy raised"
-                  : statusMeta(latestRun.status).actionLabel}
-            </span>
-          </span>
-        </div>
-      ) : null}
-
       <div className="card-foot">
         <span className="stored-count">
           Stored waiting: <strong className="num">{storedWaiting}</strong>
         </span>
+        {latestRun ? (
+          <span className="lr-inline">
+            <span className="lr-label">Last reconciliation</span>
+            <StatusChip status={latestRun.status} />
+          </span>
+        ) : null}
       </div>
     </form>
   );
