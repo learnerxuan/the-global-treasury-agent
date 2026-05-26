@@ -1,4 +1,4 @@
-import { absMoney, compareMoney, isNegativeMoney } from "./money";
+import { absMoney, compareMoney, isNegativeMoney, multiplyMoneyByRate } from "./money";
 import type { ReconciliationPolicy } from "./policy";
 import type {
   AmountResidualResult,
@@ -26,6 +26,16 @@ function absoluteCapFor(currency: string | undefined, policy: ReconciliationPoli
 
 function matchesFlatFee(amount: string, policy: ReconciliationPolicy): boolean {
   return policy.fees.flatFeeHypotheses.some((fee) => compareMoney(amount, fee) === 0);
+}
+
+function smeThresholdAmount(expectedLocalAmount: string, policy: ReconciliationPolicy): string | null {
+  const config = policy.smeConfig;
+  if (!config) return null;
+
+  const percentageThreshold = multiplyMoneyByRate(expectedLocalAmount, String(config.percentageValue));
+  if (config.mode === "percentage") return percentageThreshold;
+  if (config.mode === "fixed") return config.fixedValue;
+  return compareMoney(percentageThreshold, config.fixedValue) > 0 ? percentageThreshold : config.fixedValue;
 }
 
 export function evaluateAmountResidual(input: {
@@ -62,10 +72,17 @@ export function evaluateAmountResidual(input: {
 
   const residualPercent = Math.abs(best.residualPercent);
   const band = bandFor(residualPercent, policy);
-  const exceedsHardReviewThreshold = residualPercent > policy.residual.hardReviewThreshold;
   const absResidual = absMoney(best.residualAmount);
+  const smeThreshold = smeThresholdAmount(best.expectedLocalAmount.value, policy);
+  const exceedsHardReviewThreshold = smeThreshold
+    ? compareMoney(absResidual, smeThreshold) > 0
+    : residualPercent > policy.residual.hardReviewThreshold;
   const cap = absoluteCapFor(best.expectedLocalAmount.currency, policy);
-  const exceedsAbsoluteCap = cap === null ? compareMoney(absResidual, "0") > 0 : compareMoney(absResidual, cap) > 0;
+  const exceedsAbsoluteCap = smeThreshold
+    ? false
+    : cap === null
+      ? compareMoney(absResidual, "0") > 0
+      : compareMoney(absResidual, cap) > 0;
   const residualClassification =
     compareMoney(absResidual, "0") === 0 || band === "WITHIN_TOLERANCE"
       ? "none"

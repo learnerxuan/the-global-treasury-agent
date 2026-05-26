@@ -7,7 +7,8 @@ import type {
   ArtifactRequest,
   HumanReviewRequest,
   ReconciliationResult,
-  ReconciliationStatus
+  ReconciliationStatus,
+  ScoreBreakdown
 } from "../../lib/recon/reconciliation/types";
 import type {
   BankStatementTransaction,
@@ -122,6 +123,8 @@ export type RoleApiResult = {
 export type ReconciliationDisplayRow = {
   id: string;
   status: RunStatus;
+  bankDateLabel: string;
+  bankRefLabel: string;
   invoiceLabel: string;
   customerLabel: string;
   expectedAmountLabel: string;
@@ -141,5 +144,6 @@ export type {
   ExpectedPaymentRecord,
   HumanReviewRequest,
   NormalizedPaymentProofRecord,
-  ReconciliationResult
+  ReconciliationResult,
+  ScoreBreakdown
 };

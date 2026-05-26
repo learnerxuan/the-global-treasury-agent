@@ -12,7 +12,8 @@ import {
   fxProviderLabel,
   fxSourceKindLabel,
   myrEquivalent,
-  statusMeta
+  statusMeta,
+  timelineActorMeta
 } from "./adapter";
 import type { ReconciliationRun, RunStatus } from "./types";
 
@@ -88,9 +89,15 @@ describe("dashboard adapter", () => {
   });
 
   it("maps evidence trust levels to tone-coded chips", () => {
-    expect(evidenceTrustMeta("deterministic")).toMatchObject({ tone: "success" });
-    expect(evidenceTrustMeta("weak_ai")).toMatchObject({ tone: "review" });
-    expect(evidenceTrustMeta("missing_proof")).toMatchObject({ tone: "error" });
+    expect(evidenceTrustMeta("deterministic")).toMatchObject({ label: "Verified Data (CSV/Manual)", tone: "success" });
+    expect(evidenceTrustMeta("weak_ai")).toMatchObject({ label: "Low-Confidence Extraction", tone: "review" });
+    expect(evidenceTrustMeta("missing_proof")).toMatchObject({ label: "Missing Payment Proof", tone: "error" });
+  });
+
+  it("labels timeline actors as system activity", () => {
+    expect(timelineActorMeta("Agent 2")).toMatchObject({ label: "Reconciliation Engine", kind: "agent" });
+    expect(timelineActorMeta("Reconciliation Tool")).toMatchObject({ label: "Verification Step", kind: "tool" });
+    expect(timelineActorMeta("Artifact Module")).toMatchObject({ label: "Report Builder", kind: "artifact" });
   });
 
   it("builds a populated display row from a real auto-matchable run", () => {

@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promise
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createRuntimeBnmFxProvider, hydrateBnmRatesForBatch } from "../../lib/recon/reconciliation/fx-provider";
 import { runReconciliationOrchestrator } from "../../lib/recon/reconciliation/orchestrator";
+import type { SmeToleranceConfig } from "../../lib/recon/reconciliation/policy";
 import { LocalJsonCounterpartyIdentityStore, LocalJsonPaymentApplicationStore } from "../../lib/recon/reconciliation/stores";
 import type { OrchestratorOutput, ReconciliationResult, ReconciliationStatus } from "../../lib/recon/reconciliation/types";
 import {
@@ -73,6 +74,7 @@ export type ProofReconciliationRun = {
 export type RunReconciliationForProofOptions = {
   extractedDir?: string;
   trigger?: ProofReconciliationRun["trigger"];
+  smeConfig?: SmeToleranceConfig;
 };
 
 function resolveExtractedDir(extractedDir?: string): string {
@@ -267,15 +269,7 @@ async function writeCompletionOutputs(input: {
   ).filter((value): value is MovedRecord => value !== null);
 
   const reportPath = join(completedRoot, "reconciliation_reports", `${input.runId}.json`);
-  await writeJson(reportPath, {
-    reportId: input.runId,
-    createdAt: input.run.createdAt,
-    status: input.selectedResult.status,
-    selectedResult: input.selectedResult,
-    movedRecords,
-    reconciliation: input.run.reconciliation,
-    batchId: input.run.batch.batchId
-  });
+  await mkdir(dirname(reportPath), { recursive: true });
 
   return { reportPath: toProjectRelativePath(reportPath), movedRecords };
 }
@@ -414,7 +408,8 @@ export async function runReconciliationForWaitingProof(
   const reconciliation = runReconciliationOrchestrator(batch, {
     paymentApplicationStore: applicationStore,
     counterpartyIdentityStore,
-    fxProvider: runtimeFx.provider
+    fxProvider: runtimeFx.provider,
+    ...(options.smeConfig ? { smeConfig: options.smeConfig } : {})
   });
   const selectedResult = chooseSelectedResult(reconciliation.results, proofRecord.record.proofId);
   const status = statusFromSelectedResult(selectedResult, batch);
@@ -467,6 +462,7 @@ export async function runReconciliationForWaitingProof(
   }
 
   const runPath = join(extractedDir, "reconciliation_runs", `${runId}.json`);
+  const persistedRunPath = reconciliationReportPath ?? toProjectRelativePath(runPath);
   const run: ProofReconciliationRun = {
     ...baseRun,
     movedRecords,
@@ -474,47 +470,132 @@ export async function runReconciliationForWaitingProof(
       reconciliationReportPath,
       discrepancySummaryPath,
       mockNotificationPath,
-      runPath: toProjectRelativePath(runPath)
+      runPath: persistedRunPath
     }
   };
-  await writeJson(runPath, run);
+  if (reconciliationReportPath) {
+    await writeJson(toAbsoluteProjectPath(reconciliationReportPath), run);
+  } else {
+    await writeJson(runPath, run);
+  }
   return run;
 }
 
-async function moveJsonFiles(fromDir: string, toDir: string): Promise<void> {
-  const paths = await listJsonFiles(fromDir);
-  if (paths.length === 0) return;
-  await mkdir(toDir, { recursive: true });
-  for (const from of paths) {
-    await rename(from, join(toDir, basename(from)));
+export async function approveReconciliationRun(
+  runId: string,
+  options: { extractedDir?: string } = {}
+): Promise<ProofReconciliationRun> {
+  const extractedDir = resolveExtractedDir(options.extractedDir);
+  const runPath = join(extractedDir, "reconciliation_runs", `${runId}.json`);
+  const run = await readJson(runPath) as ProofReconciliationRun;
+  const selectedResult = run.selectedResult;
+  const hasSelectedExpected =
+    Boolean(selectedResult?.expectedPaymentId) || Boolean((selectedResult?.expectedPaymentIds?.length ?? 0) > 0);
+
+  if (!selectedResult || !hasSelectedExpected || !selectedResult.bankTransactionId || !selectedResult.proofId) {
+    throw new Error("Run does not have enough selected match evidence to approve.");
   }
+
+  const [invoiceRecords, bankRecords, proofRecords] = await Promise.all([
+    readWaitingRecords(join(extractedDir, "waiting", "invoices"), "invoice", expectedPaymentRecordSchema),
+    readWaitingRecords(join(extractedDir, "waiting", "bank_transactions"), "bank_statement", bankStatementTransactionSchema),
+    readWaitingRecords(join(extractedDir, "waiting", "payment_proofs"), "payment_proof", normalizedPaymentProofRecordSchema)
+  ]);
+  const completion = await writeCompletionOutputs({
+    extractedDir,
+    runId,
+    run,
+    selectedResult,
+    invoiceRecords: new Map(invoiceRecords.map((stored) => [recordId(stored.record), stored])),
+    bankRecords: new Map(bankRecords.map((stored) => [recordId(stored.record), stored])),
+    proofRecords: new Map(proofRecords.map((stored) => [recordId(stored.record), stored]))
+  });
+  const completedRun: ProofReconciliationRun = {
+    ...run,
+    status: "AUTO_MATCHED",
+    movedRecords: completion.movedRecords,
+    outputPaths: {
+      reconciliationReportPath: completion.reportPath,
+      discrepancySummaryPath: run.outputPaths.discrepancySummaryPath,
+      mockNotificationPath: run.outputPaths.mockNotificationPath,
+      runPath: completion.reportPath
+    },
+    nextAction: "Approved match was moved to completed. Review the reconciliation report."
+  };
+
+  await writeJson(toAbsoluteProjectPath(completion.reportPath), completedRun);
+  await rm(runPath, { force: true });
+  return completedRun;
+}
+
+export async function rejectReconciliationRun(
+  runId: string,
+  options: { extractedDir?: string } = {}
+): Promise<ProofReconciliationRun> {
+  const extractedDir = resolveExtractedDir(options.extractedDir);
+  const runPath = join(extractedDir, "reconciliation_runs", `${runId}.json`);
+  const run = await readJson(runPath) as ProofReconciliationRun;
+
+  const rejectedRunsDir = join(extractedDir, "rejected", "reconciliation_runs");
+  const rejectedProofsDir = join(extractedDir, "rejected", "payment_proofs");
+
+  await mkdir(rejectedRunsDir, { recursive: true });
+  await mkdir(rejectedProofsDir, { recursive: true });
+
+  const newRunPath = join(rejectedRunsDir, `${runId}.json`);
+  let newProofPath = run.proofPath;
+  
+  if (run.proofPath) {
+    const absProofPath = toAbsoluteProjectPath(run.proofPath);
+    const proofTarget = join(rejectedProofsDir, basename(absProofPath));
+    try {
+      await rename(absProofPath, proofTarget);
+      newProofPath = toProjectRelativePath(proofTarget);
+    } catch {
+      // Ignore if it's already moved or missing
+    }
+  }
+
+  const rejectedRun: ProofReconciliationRun = {
+    ...run,
+    status: "UNMATCHED",
+    proofPath: newProofPath,
+    outputPaths: {
+      ...run.outputPaths,
+      runPath: toProjectRelativePath(newRunPath)
+    },
+    nextAction: "Match was rejected. This item is isolated from the waiting queue."
+  };
+
+  await writeJson(newRunPath, rejectedRun);
+  await rm(runPath, { force: true });
+
+  return rejectedRun;
 }
 
 // Re-runs reconciliation for every waiting payment proof against the current
-// waiting invoices/bank transactions, WITHOUT re-extracting any files. Records
-// previously moved to completed are returned to waiting first so the whole set
-// is re-evaluated, and stale runs/discrepancies/reports are cleared.
+// waiting invoices/bank transactions, WITHOUT re-extracting any files. Completed
+// records remain physically separated and completed reports are preserved.
 export async function rescanWaitingProofs(
-  options: { extractedDir?: string } = {}
+  options: { extractedDir?: string; smeConfig?: SmeToleranceConfig } = {}
 ): Promise<{ runs: ProofReconciliationRun[] }> {
   const extractedDir = resolveExtractedDir(options.extractedDir);
 
   await Promise.all([
-    moveJsonFiles(join(extractedDir, "completed", "invoices"), join(extractedDir, "waiting", "invoices")),
-    moveJsonFiles(join(extractedDir, "completed", "bank_transactions"), join(extractedDir, "waiting", "bank_transactions")),
-    moveJsonFiles(join(extractedDir, "completed", "payment_proofs"), join(extractedDir, "waiting", "payment_proofs"))
-  ]);
-
-  await Promise.all([
     rm(join(extractedDir, "reconciliation_runs"), { recursive: true, force: true }),
-    rm(join(extractedDir, "discrepancies"), { recursive: true, force: true }),
-    rm(join(extractedDir, "completed", "reconciliation_reports"), { recursive: true, force: true })
+    rm(join(extractedDir, "discrepancies"), { recursive: true, force: true })
   ]);
 
   const proofPaths = await listJsonFiles(join(extractedDir, "waiting", "payment_proofs"));
   const runs: ProofReconciliationRun[] = [];
   for (const path of proofPaths) {
-    runs.push(await runReconciliationForWaitingProof(path, { extractedDir, trigger: "manual_run_for_proof" }));
+    runs.push(
+      await runReconciliationForWaitingProof(path, {
+        extractedDir,
+        trigger: "manual_run_for_proof",
+        ...(options.smeConfig ? { smeConfig: options.smeConfig } : {})
+      })
+    );
   }
   return { runs };
 }

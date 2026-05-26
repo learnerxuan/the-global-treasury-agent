@@ -12,5 +12,6 @@ dist/
 build/
 runtime/
 eng.traineddata
+.arc/
 .DS_Store
 Thumbs.db

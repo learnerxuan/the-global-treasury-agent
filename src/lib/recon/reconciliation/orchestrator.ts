@@ -272,7 +272,10 @@ export function runReconciliationOrchestrator(
   batch: NormalizedInputBatch,
   options: ReconciliationOrchestratorOptions = {}
 ): import("./types").OrchestratorOutput {
-  const policy: ReconciliationPolicy = DEFAULT_POLICY;
+  const policy: ReconciliationPolicy = {
+    ...DEFAULT_POLICY,
+    ...(options.smeConfig ? { smeConfig: options.smeConfig } : {})
+  };
   const timeline = createAgentTimeline(options.now);
   const paymentApplicationStore = options.paymentApplicationStore ?? new InMemoryPaymentApplicationStore();
   const ledgerApplications = paymentApplicationStore.listApplications();
@@ -419,6 +422,7 @@ export function runReconciliationOrchestrator(
       status,
       bankTransactionId: bankTx.internalTxId,
       score: selected?.score ?? 0,
+      ...(selected?.breakdown ? { scoreBreakdown: selected.breakdown } : {}),
       reasonCodes: effectiveClassification.reasonCodes,
       hardReviewFlags: effectiveClassification.hardReviewFlags,
       policyVersion: policy.version,

@@ -1,15 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useDashboard } from "./DashboardContext";
 
-type AppHeaderProps = {
-  onClearDemo: () => void;
-  clearing: boolean;
-  resetMessage: string | null;
-  resetError: boolean;
-  onRescan: () => void;
-  rescanning: boolean;
-};
+export function AppHeader() {
+  const { clearDemoData, clearing, resetMessage, resetError, rescan, rescanning } = useDashboard();
 
-export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onRescan, rescanning }: AppHeaderProps) {
   return (
     <header className="app-header">
       <Link className="brand" href="/landing">
@@ -25,7 +21,7 @@ export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onR
           <p className="tagline">Cross-border reconciliation workspace</p>
         </div>
       </Link>
-      <p className="header-tagline">AI extracts evidence. Code does money math. Humans approve risky cases.</p>
+
       <div className="header-actions">
         {resetMessage ? (
           <span className={`reset-message ${resetError ? "error" : ""}`}>{resetMessage}</span>
@@ -33,7 +29,7 @@ export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onR
         <Link className="ghost-link" href="/debug">
           Debug
         </Link>
-        <button className="secondary-button" type="button" onClick={onRescan} disabled={rescanning}>
+        <button className="secondary-button" type="button" onClick={rescan} disabled={rescanning}>
           {rescanning ? (
             "Re-running…"
           ) : (
@@ -48,7 +44,7 @@ export function AppHeader({ onClearDemo, clearing, resetMessage, resetError, onR
             </>
           )}
         </button>
-        <button className="secondary-button" type="button" onClick={onClearDemo} disabled={clearing}>
+        <button className="secondary-button" type="button" onClick={clearDemoData} disabled={clearing}>
           {clearing ? (
             "Clearing…"
           ) : (

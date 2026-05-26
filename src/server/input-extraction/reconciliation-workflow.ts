@@ -8,6 +8,7 @@ import { createChutesStructuredExtractor, type DocumentRole, type StructuredDocu
 import { normalizeInputBatch } from "../../lib/recon/normalize-input-batch";
 import { normalize_currency_amount, normalize_date, normalize_party_name, normalize_reference } from "../../lib/recon/normalizers";
 import { parseBankStatements, parseBankStatementText } from "../../lib/recon/parsers/bank-statements";
+import type { SmeToleranceConfig } from "../../lib/recon/reconciliation/policy";
 import { runReconciliationForWaitingProof, type ProofReconciliationRun } from "../reconciliation/waiting-reconciliation";
 import type {
   BankStatementTransaction,
@@ -82,6 +83,7 @@ export type ReconciliationExtractionOptions = {
   storageDir?: string;
   extractedDir?: string;
   extractor?: StructuredExtractor;
+  smeConfig?: SmeToleranceConfig;
 };
 
 export type LocalExtractionStorage = {
@@ -1055,7 +1057,11 @@ export async function extractRoleDocuments(
   if (role === "payment_proof") {
     for (const path of storage.waitingRecordPaths) {
       reconciliationRuns.push(
-        await runReconciliationForWaitingProof(path, { extractedDir, trigger: "payment_proof_uploaded" })
+        await runReconciliationForWaitingProof(path, {
+          extractedDir,
+          trigger: "payment_proof_uploaded",
+          ...(options.smeConfig ? { smeConfig: options.smeConfig } : {})
+        })
       );
     }
   }

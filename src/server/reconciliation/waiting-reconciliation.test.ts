@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { cleanNormalizedBatch } from "../../lib/recon/fixtures/normalized/clean";
-import { clearLocalReconciliationRuntime, runReconciliationForWaitingProof } from "./waiting-reconciliation";
+import { clearLocalReconciliationRuntime, rescanWaitingProofs, runReconciliationForWaitingProof } from "./waiting-reconciliation";
+import { listCompletedReconciliationRuns } from "./runtime-readers";
 
 async function writeWaitingRecord(input: {
   extractedDir: string;
@@ -87,6 +88,50 @@ describe("runReconciliationForWaitingProof", () => {
     expect(await exists(bankPath)).toBe(false);
     expect(await exists(proofPath)).toBe(false);
     await expect(readFile(result.outputPaths.reconciliationReportPath!, "utf8")).resolves.toContain("AUTO_MATCHED");
+    const completedReport = JSON.parse(await readFile(result.outputPaths.reconciliationReportPath!, "utf8"));
+    expect(completedReport.runId).toBe(result.runId);
+    expect(completedReport.batch.paymentProofs[0]?.proofId).toBe(proof.proofId);
+  });
+
+  it("keeps completed records and reports separate during rescan", async () => {
+    const extractedDir = await mkdtemp(join(tmpdir(), "reconpilot-rescan-"));
+    const invoice = cleanNormalizedBatch.expectedPayments[0]!;
+    const bank = cleanNormalizedBatch.bankTransactions[0]!;
+    const proof = cleanNormalizedBatch.paymentProofs[0]!;
+
+    const invoicePath = await writeWaitingRecord({
+      extractedDir,
+      folder: "invoices",
+      role: "invoice",
+      id: invoice.expectedPaymentId,
+      record: invoice
+    });
+    const bankPath = await writeWaitingRecord({
+      extractedDir,
+      folder: "bank_transactions",
+      role: "bank_statement",
+      id: bank.internalTxId,
+      record: bank
+    });
+    const proofPath = await writeWaitingRecord({
+      extractedDir,
+      folder: "payment_proofs",
+      role: "payment_proof",
+      id: proof.proofId,
+      record: proof
+    });
+
+    const completed = await runReconciliationForWaitingProof(proofPath, { extractedDir });
+    const rescan = await rescanWaitingProofs({ extractedDir });
+    const completedRuns = await listCompletedReconciliationRuns(extractedDir);
+
+    expect(completed.status).toBe("AUTO_MATCHED");
+    expect(rescan.runs).toHaveLength(0);
+    expect(completedRuns.map((run) => run.runId)).toContain(completed.runId);
+    expect(await exists(invoicePath)).toBe(false);
+    expect(await exists(bankPath)).toBe(false);
+    expect(await exists(proofPath)).toBe(false);
+    expect(await exists(completed.outputPaths.reconciliationReportPath!)).toBe(true);
   });
 
   it("keeps an unresolved proof in waiting and writes discrepancy artifacts when no bank credit exists", async () => {

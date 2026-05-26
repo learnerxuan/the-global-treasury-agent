@@ -4,6 +4,14 @@ import type { CurrencyCode } from "../types";
 // receive a ReconciliationPolicy so behaviour is explicit and testable, never
 // hidden in magic numbers scattered across the codebase.
 
+export type SmeToleranceMode = "percentage" | "fixed" | "hybrid";
+
+export type SmeToleranceConfig = {
+  mode: SmeToleranceMode;
+  percentageValue: number;
+  fixedValue: string;
+};
+
 export type ReconciliationPolicy = {
   version: string;
   fx: {
@@ -67,7 +75,38 @@ export type ReconciliationPolicy = {
     maxToolRetries: number;
     maxClarificationsPerCase: number;
   };
+  smeConfig?: SmeToleranceConfig;
 };
+
+const SME_TOLERANCE_MODES = new Set<SmeToleranceMode>(["percentage", "fixed", "hybrid"]);
+
+function assertMoneyString(value: unknown): string {
+  if (typeof value !== "string" || !/^\d+(?:\.\d{1,2})?$/.test(value.trim())) {
+    throw new Error("smeConfig.fixedValue must be a non-negative decimal amount.");
+  }
+  return value.trim();
+}
+
+export function parseSmeToleranceConfig(value: unknown): SmeToleranceConfig | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object") {
+    throw new Error("smeConfig must be an object.");
+  }
+
+  const candidate = value as Partial<SmeToleranceConfig>;
+  if (!SME_TOLERANCE_MODES.has(candidate.mode as SmeToleranceMode)) {
+    throw new Error("smeConfig.mode must be percentage, fixed, or hybrid.");
+  }
+  if (typeof candidate.percentageValue !== "number" || !Number.isFinite(candidate.percentageValue) || candidate.percentageValue < 0 || candidate.percentageValue > 1) {
+    throw new Error("smeConfig.percentageValue must be a decimal fraction between 0 and 1.");
+  }
+
+  return {
+    mode: candidate.mode as SmeToleranceMode,
+    percentageValue: candidate.percentageValue,
+    fixedValue: assertMoneyString(candidate.fixedValue)
+  };
+}
 
 export const DEFAULT_POLICY: ReconciliationPolicy = {
   version: "enterprise-v1-local",

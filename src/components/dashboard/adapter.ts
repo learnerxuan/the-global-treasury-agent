@@ -104,6 +104,16 @@ export function fxBasisLabel(basis: string): string {
   }
 }
 
+export function formatFxRateLabel(run: ReconciliationRun): string {
+  const fx = run.selectedResult?.bestFxScenario;
+  if (!fx) return "—";
+  const rate = Number(fx.rate);
+  const rateLabel = Number.isFinite(rate)
+    ? new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(rate)
+    : fx.rate;
+  return `Rate: ${rateLabel} (${fxBasisLabel(fx.basis)})`;
+}
+
 export function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
@@ -180,13 +190,13 @@ export type TrustMeta = { label: string; tone: StatusTone };
 export function evidenceTrustMeta(level: EvidenceTrustLevel | undefined): TrustMeta {
   switch (level) {
     case "deterministic":
-      return { label: "Deterministic", tone: "success" };
+      return { label: "Verified Data (CSV/Manual)", tone: "success" };
     case "supported_ai":
-      return { label: "AI-supported", tone: "info" };
+      return { label: "High-Confidence AI Extraction", tone: "info" };
     case "weak_ai":
-      return { label: "Weak AI evidence", tone: "review" };
+      return { label: "Low-Confidence Extraction", tone: "review" };
     case "missing_proof":
-      return { label: "Missing proof", tone: "error" };
+      return { label: "Missing Payment Proof", tone: "error" };
     default:
       return { label: "Unknown", tone: "neutral" };
   }
@@ -229,28 +239,33 @@ export function receivedAmount(run: ReconciliationRun): MoneyLike {
   return proof?.financialPayload.paidAmount ?? null;
 }
 
+export function bankReferenceLabel(bank: BankStatementTransaction | undefined): string {
+  return bank?.referenceNo ?? bank?.acctSvcrRef ?? bank?.txId ?? bank?.normalizedReference ?? "—";
+}
+
 export function buildDisplayRow(run: ReconciliationRun): ReconciliationDisplayRow {
   const selected = run.selectedResult;
   const invoice = findInvoice(run);
+  const bank = findBank(run);
 
   const invoiceLabel = invoice?.invoiceNumber ?? selected?.expectedPaymentId ?? "—";
   const expectedAmountLabel = formatMoney(invoice?.amountDue ?? null);
   const receivedAmountLabel = formatMoney(receivedAmount(run));
 
-  const fx = selected?.bestFxScenario;
-  const fxBasisText = fx ? `${fxBasisLabel(fx.basis)} · ${fx.rate}` : "—";
   const scoreLabel = selected ? String(Math.round(selected.score)) : "—";
 
   return {
     id: run.runId,
     status: run.status,
+    bankDateLabel: bank?.bookingDate ?? "—",
+    bankRefLabel: bankReferenceLabel(bank),
     invoiceLabel,
     customerLabel: customerLabel(run),
     expectedAmountLabel,
     expectedAmountMyr: myrEquivalent(invoice?.amountDue ?? null, run)?.text ?? null,
     receivedAmountLabel,
     receivedAmountMyr: myrEquivalent(receivedAmount(run), run)?.text ?? null,
-    fxBasisLabel: fxBasisText,
+    fxBasisLabel: formatFxRateLabel(run),
     scoreLabel,
     summary: run.summary,
     run
@@ -262,11 +277,11 @@ export type TimelineActorKind = "agent" | "tool" | "artifact" | "human";
 export function timelineActorMeta(actor: string): { label: string; kind: TimelineActorKind } {
   switch (actor) {
     case "Agent 2":
-      return { label: "Agent 2", kind: "agent" };
+      return { label: "Reconciliation Engine", kind: "agent" };
     case "Reconciliation Tool":
-      return { label: "Code Tools", kind: "tool" };
+      return { label: "Verification Step", kind: "tool" };
     case "Artifact Module":
-      return { label: "Artifact Module", kind: "artifact" };
+      return { label: "Report Builder", kind: "artifact" };
     case "Human Review":
       return { label: "Human Review", kind: "human" };
     default:

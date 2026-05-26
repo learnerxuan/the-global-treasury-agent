@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   allocationReasonLabel,
+  bankReferenceLabel,
   candidateKindLabel,
   evidenceTrustMeta,
   findBank,
@@ -14,24 +15,23 @@ import {
   fxSourceKindLabel,
   fxSourceLabel,
   myrEquivalent,
-  receivedAmount,
   statusMeta,
   timelineActorMeta
 } from "./adapter";
 import { DocumentCompare } from "./DocumentCompare";
 import { StatusChip } from "./StatusChip";
 import type { ReconciliationDisplayRow, RunStatus } from "./types";
-import type { EvidenceTrustLevel } from "../../lib/recon/reconciliation/types";
+import type { EvidenceTrustLevel, ScoreBreakdown } from "../../lib/recon/reconciliation/types";
 
 type Tab = "overview" | "evidence" | "fx" | "timeline" | "trust" | "artifacts";
 
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: "overview", label: "Overview" },
-  { key: "evidence", label: "Evidence" },
-  { key: "fx", label: "FX Reasoning" },
-  { key: "timeline", label: "Agent Timeline" },
-  { key: "trust", label: "Trust & Audit" },
-  { key: "artifacts", label: "Artifacts" }
+  { key: "overview", label: "Summary" },
+  { key: "evidence", label: "Source Documents" },
+  { key: "fx", label: "Currency Conversion" },
+  { key: "timeline", label: "System Activity" },
+  { key: "trust", label: "Data Quality Checks" },
+  { key: "artifacts", label: "Raw Data Logs" }
 ];
 
 const REASON_COPY: Record<RunStatus, string> = {
@@ -42,28 +42,55 @@ const REASON_COPY: Record<RunStatus, string> = {
   NO_PROOF_RECORD: "No payment proof record was available to reconcile."
 };
 
-const ACTIONS: Record<RunStatus, string[]> = {
+export const RECONCILIATION_ACTIONS: Record<RunStatus, string[]> = {
   AUTO_MATCHED: ["View Report"],
-  LIKELY_MATCHED: ["Approve Match", "Reject", "Request More Info"],
-  NEEDS_REVIEW: ["Approve with Note", "Reject Match", "Request More Proof"],
-  UNMATCHED: ["Mark as Unresolved", "Upload Missing Evidence", "Create Discrepancy Note"],
+  LIKELY_MATCHED: ["Approve", "Reject"],
+  NEEDS_REVIEW: ["Approve", "Reject"],
+  UNMATCHED: ["Upload Missing Evidence"],
   NO_PROOF_RECORD: ["Upload Missing Evidence"]
 };
 
+export function actionCode(label: string): string {
+  switch (label) {
+    case "View Report":
+      return "VIEW_REPORT";
+    case "Approve":
+    case "Approve Match":
+    case "Approve with Note":
+      return "APPROVE_MATCH";
+    case "Reject":
+    case "Reject Match":
+      return "REJECT_MATCH";
+    case "Upload Missing Evidence":
+      return "UPLOAD_MISSING_EVIDENCE";
+    default:
+      return "REQUEST_MORE_INFO";
+  }
+}
+
 // Trust level shown as a 4-rung ladder from least to most trustworthy.
 const TRUST_LADDER: Array<{ level: EvidenceTrustLevel; label: string }> = [
-  { level: "missing_proof", label: "Missing" },
-  { level: "weak_ai", label: "Weak AI" },
-  { level: "supported_ai", label: "AI-supported" },
-  { level: "deterministic", label: "Deterministic" }
+  { level: "missing_proof", label: "Missing Payment Proof" },
+  { level: "weak_ai", label: "Low-Confidence Extraction" },
+  { level: "supported_ai", label: "High-Confidence AI Extraction" },
+  { level: "deterministic", label: "Verified Data (CSV/Manual)" }
 ];
 
 const TRUST_BLURB: Record<EvidenceTrustLevel, string> = {
-  deterministic: "Fields were parsed deterministically (CSV / spreadsheet / manual) — the highest-trust source.",
-  supported_ai: "AI-extracted, with every critical field above the confidence floor.",
-  weak_ai: "AI-extracted, but one or more critical fields fell below the confidence floor.",
-  missing_proof: "No payment-proof evidence was available to support this match."
+  deterministic: "Key fields came from verified structured data such as CSV, spreadsheet, or manual entry.",
+  supported_ai: "Key fields were extracted by AI and passed the confidence checks.",
+  weak_ai: "One or more AI-extracted fields fell below the confidence threshold.",
+  missing_proof: "No payment proof was available to support this match."
 };
+
+const SCORE_LABELS: Array<{ key: keyof ScoreBreakdown; label: string }> = [
+  { key: "reference", label: "Reference" },
+  { key: "amountFx", label: "Amount / FX" },
+  { key: "date", label: "Date" },
+  { key: "name", label: "Name" },
+  { key: "confidence", label: "AI confidence" },
+  { key: "competitionPenalty", label: "Competition penalty" }
+];
 
 function trustRank(level: EvidenceTrustLevel): number {
   return Math.max(0, TRUST_LADDER.findIndex((step) => step.level === level));
@@ -92,20 +119,122 @@ function routeLabel(route: string | null): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const CODE_COPY: Record<string, string> = {
+  AMOUNT_SIGNIFICANT_VARIANCE: "The amount difference is significant.",
+  AMOUNT_SMALL_VARIANCE: "The amount has a small difference.",
+  AMOUNT_UNEXPLAINED: "The amount difference is unexplained.",
+  AMOUNT_WITHIN_TOLERANCE: "The amount is within tolerance.",
+  COMPETING_CANDIDATES: "Multiple possible matches were found.",
+  COMPETING_CANDIDATES_CLOSE: "Multiple close matches need review.",
+  COUNTERPARTY_ACCOUNT_MATCH: "The counterparty account matches.",
+  COUNTERPARTY_ALIAS_MATCH: "The counterparty alias matches.",
+  DATE_CLOSE: "The payment dates are close.",
+  DATE_FAR: "The payment dates are far apart.",
+  DUPLICATE_BANK_TRANSACTION: "A duplicate bank transaction may exist.",
+  DUPLICATE_PROOF_TX_ID: "A duplicate payment proof transaction ID may exist.",
+  EXACT_REFERENCE_MATCH: "The payment reference matches exactly.",
+  FIXTURE_FALLBACK_ONLY: "Only the fallback currency rate was available.",
+  FLAT_FEE_EXPLAINS_RESIDUAL: "A flat fee explains the unexplained difference.",
+  FX_EXPLAINS_AMOUNT: "Currency conversion explains the amount.",
+  FX_VARIANCE_EXPLAINS_RESIDUAL: "Currency conversion variance explains the unexplained difference.",
+  HIGH_EXTRACTION_CONFIDENCE: "The extracted fields have high confidence.",
+  IGNORED_GENERIC_REFERENCE_TOKEN: "A generic reference token was ignored.",
+  LOW_CONFIDENCE_CRITICAL_FIELD: "A critical extracted field has low confidence.",
+  LOW_EXTRACTION_CONFIDENCE: "The extracted fields have low confidence.",
+  MISSING_REFERENCE_WEAK_NAME: "The reference is missing and the payer name match is weak.",
+  NAME_MATCH: "The payer name matches.",
+  NAME_MISMATCH: "The payer name does not match.",
+  NAME_SIMILAR: "The payer name is similar.",
+  NO_CANDIDATE: "No reliable match candidate was found.",
+  NO_FX_SCENARIO: "No suitable currency conversion scenario was found.",
+  NO_REFERENCE: "No payment reference was found.",
+  NO_USABLE_FX_SCENARIO: "No usable currency conversion scenario was found.",
+  PARTIAL_REFERENCE_MATCH: "The payment reference partially matches.",
+  PARTIAL_REFERENCE_WEAK_EVIDENCE: "The reference only partially matches and supporting evidence is weak.",
+  POSSIBLE_BATCH_PAYMENT: "This may be a batch payment.",
+  POSSIBLE_FEE_OR_SPREAD: "A fee or currency spread may explain the difference.",
+  POSSIBLE_OVERPAYMENT: "The received amount may be higher than the invoice amount.",
+  POSSIBLE_PARTIAL_PAYMENT: "This may be a partial payment.",
+  POSSIBLE_REVERSAL: "This may be a reversal or correction entry.",
+  POSSIBLE_SHORT_PAYMENT: "The received amount may be short of the invoice amount.",
+  PROOF_NOT_SETTLED: "The payment proof is not marked as settled.",
+  RESIDUAL_ABSOLUTE_CAP_EXCEEDED: "The unexplained difference exceeds the absolute limit.",
+  RESIDUAL_ABOVE_THRESHOLD: "The unexplained difference is above the review threshold.",
+  STRUCTURED_REFERENCE_MATCH: "The structured payment reference matches.",
+  UNEXPLAINED_RESIDUAL_ABOVE_CAP: "The unexplained difference exceeds the allowed cap.",
+  WEAK_PARTIAL_REFERENCE_MATCH: "The payment reference only weakly matches."
+};
+
+function sentenceCase(text: string): string {
+  if (!text) return text;
+  return `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
+}
+
 function formatCode(code: string): string {
-  return code
+  const mapped = CODE_COPY[code];
+  if (mapped) return mapped;
+
+  const phrase = code
     .toLowerCase()
     .split("_")
-    .map((part) => (part.length > 0 ? `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}` : part))
+    .filter(Boolean)
     .join(" ");
+  return sentenceCase(phrase);
+}
+
+function buildDecisionNarrative({
+  run,
+  invoiceLabel,
+  bankAmountLabel,
+  selected
+}: {
+  run: ReconciliationDisplayRow["run"];
+  invoiceLabel: string;
+  bankAmountLabel: string;
+  selected: ReconciliationDisplayRow["run"]["selectedResult"];
+}): string {
+  const invoiceText = invoiceLabel === "—" ? "the closest invoice candidate" : `Invoice #${invoiceLabel}`;
+  const bankText = bankAmountLabel === "—" ? "the closest bank transaction" : `the bank deposit of ${bankAmountLabel}`;
+  const basis = selected?.bestFxScenario ? fxBasisLabel(selected.bestFxScenario.basis) : null;
+  const difference = selected?.bestFxScenario
+    ? formatPercent(selected.bestFxScenario.residualPercent)
+    : selected?.residual
+      ? formatPercent(selected.residual.residualPercent)
+      : null;
+  const reason = selected?.reviewPayload?.blockers[0] ?? selected?.hardReviewFlags[0] ?? selected?.reasonCodes[0];
+
+  if (run.status === "AUTO_MATCHED") {
+    const conversion = basis
+      ? ` The currency conversion was calculated using ${basis}, leaving ${difference ?? "no"} unexplained difference.`
+      : " No currency conversion was required.";
+    return `This payment was successfully matched to ${invoiceText} and ${bankText}.${conversion}`;
+  }
+
+  if (run.status === "LIKELY_MATCHED") {
+    return `The system found a strong match between this payment, ${invoiceText}, and ${bankText}, but approval is recommended before closing the case.${reason ? ` Reason: ${formatCode(reason)}` : ""}`;
+  }
+
+  if (run.status === "NEEDS_REVIEW") {
+    return `The system matched this payment to ${invoiceText}, but human review is required.${reason ? ` Reason: ${formatCode(reason)}` : ""}`;
+  }
+
+  if (run.status === "UNMATCHED") {
+    return `The system could not confidently match this payment to an invoice and bank deposit.${reason ? ` Reason: ${formatCode(reason)}` : ""}`;
+  }
+
+  return REASON_COPY[run.status];
 }
 
 export function ReconciliationDetailModal({
   row,
-  onClose
+  readOnly = false,
+  onClose,
+  onActionComplete
 }: {
   row: ReconciliationDisplayRow;
+  readOnly?: boolean;
   onClose: () => void;
+  onActionComplete?: () => Promise<void> | void;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [actionConfirm, setActionConfirm] = useState<string | null>(null);
@@ -133,35 +262,23 @@ export function ReconciliationDetailModal({
   const invoiceMyr = invoice ? myrEquivalent(invoice.amountDue, run) : null;
   const proofMyr = proof ? myrEquivalent(proof.financialPayload.paidAmount, run) : null;
   const bankMyr = bank ? myrEquivalent(bank.netCreditAmount ?? bank.amount, run) : null;
+  const decisionNarrative = buildDecisionNarrative({
+    run,
+    invoiceLabel: row.invoiceLabel,
+    bankAmountLabel: bank ? formatMoney(bank.netCreditAmount ?? bank.amount) : row.receivedAmountLabel,
+    selected
+  });
+  const availableActions = readOnly ? ["View Report"] : RECONCILIATION_ACTIONS[run.status];
   // Original uploaded files, traced back via each record's sourceFileId.
   const invoiceFileId = invoice?.sourceFileId ?? null;
   const proofFileId = proof?.sourceFileId ?? null;
   const bankFileId = bank?.sourceFileId ?? null;
-  const canCompare = Boolean(invoiceFileId && proofFileId);
-
-  function actionCode(label: string): string {
-    switch (label) {
-      case "View Report":
-        return "VIEW_REPORT";
-      case "Approve Match":
-      case "Approve with Note":
-        return "APPROVE_MATCH";
-      case "Reject":
-      case "Reject Match":
-        return "REJECT_MATCH";
-      case "Request More Info":
-      case "Request More Proof":
-        return "REQUEST_MORE_INFO";
-      case "Mark as Unresolved":
-        return "MARK_UNRESOLVED";
-      case "Upload Missing Evidence":
-        return "UPLOAD_MISSING_EVIDENCE";
-      case "Create Discrepancy Note":
-        return "CREATE_DISCREPANCY_NOTE";
-      default:
-        return "REQUEST_MORE_INFO";
-    }
-  }
+  const canCompare = Boolean(invoiceFileId || proofFileId || bankFileId);
+  const bankAmountLabel = bank ? formatMoney(bank.netCreditAmount ?? bank.amount) : row.receivedAmountLabel;
+  const bankRefLabel = bankReferenceLabel(bank);
+  const matchedInvoiceLabel = row.invoiceLabel === "—" ? "No invoice selected" : `Matched to: Invoice ${row.invoiceLabel}`;
+  const fxScenario = selected?.bestFxScenario;
+  const actualBankAmount = bank ? bank.netCreditAmount ?? bank.amount : null;
 
   async function handleAction(label: string) {
     setActionConfirm(null);
@@ -169,7 +286,7 @@ export function ReconciliationDetailModal({
 
     if (label === "View Report") {
       setTab("artifacts");
-      setActionConfirm("Report opened in the Artifacts tab.");
+      setActionConfirm("Report opened in the Raw Data Logs tab.");
       return;
     }
 
@@ -183,7 +300,7 @@ export function ReconciliationDetailModal({
           proofId: run.proofId,
           invoiceLabel: row.invoiceLabel,
           action: actionCode(label),
-          note: `${label} selected from reconciliation detail modal.`
+          note: null
         })
       });
       const body = await response.json();
@@ -192,6 +309,10 @@ export function ReconciliationDetailModal({
         return;
       }
       setActionConfirm(`${label} saved to the local audit log for ${row.invoiceLabel}.`);
+      await onActionComplete?.();
+      if (actionCode(label) === "APPROVE_MATCH" || actionCode(label) === "REJECT_MATCH") {
+        onClose();
+      }
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to save action.");
     } finally {
@@ -204,9 +325,10 @@ export function ReconciliationDetailModal({
       <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Reconciliation case ${row.invoiceLabel}`}>
         <div className="modal-header">
           <div>
-            <div className="mh-id num">{row.invoiceLabel}</div>
+            <div className="mh-id num">Bank Deposit: {bankAmountLabel} (Ref: {bankRefLabel})</div>
             <div className="mh-meta">
               <StatusChip status={run.status} />
+              <span className="chip plain">{matchedInvoiceLabel}</span>
               <span className="mh-score num">Score {row.scoreLabel}</span>
             </div>
           </div>
@@ -231,8 +353,38 @@ export function ReconciliationDetailModal({
         <div className="modal-body">
           {tab === "overview" ? (
             <>
+              {selected?.reviewPayload?.required ? (
+                <div className="review-warning-box" role="alert">
+                  <div className="review-warning-title">Human review required</div>
+                  <p>{selected.reviewPayload.primaryQuestion ?? "This case requires human review before it can be closed."}</p>
+                  {selected.reviewPayload.blockers.length > 0 ? (
+                    <>
+                      <div className="review-warning-subtitle">System Flags</div>
+                      <ul className="review-warning-list">
+                        {selected.reviewPayload.blockers.map((flag) => (
+                          <li key={flag}>{formatCode(flag)}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  {selected.reviewPayload.suggestedActions.length > 0 ? (
+                    <>
+                      <div className="review-warning-subtitle">Recommended actions</div>
+                      <ul className="review-warning-list">
+                        {selected.reviewPayload.suggestedActions.map((action) => (
+                          <li key={action}>{action}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="field-block">
-                <div className="fb-label">Decision</div>
+                <div className="fb-label">Decision summary</div>
+                <div className="fb-value summary-narrative">{decisionNarrative}</div>
+              </div>
+              <div className="field-block">
+                <div className="fb-label">Status</div>
                 <div className="fb-value decision-line">
                   <StatusChip status={run.status} />
                   {selected?.evidenceTrust ? (
@@ -241,6 +393,24 @@ export function ReconciliationDetailModal({
                     </span>
                   ) : null}
                 </div>
+              </div>
+              <div className="score-breakdown">
+                <div className="score-breakdown-head">
+                  <span>Match Score Breakdown</span>
+                  <span className="num">{row.scoreLabel}</span>
+                </div>
+                {selected?.scoreBreakdown ? (
+                  <div className="score-breakdown-grid">
+                    {SCORE_LABELS.map((item) => (
+                      <div className="score-item" key={item.key}>
+                        <span>{item.label}</span>
+                        <span className="num">{selected.scoreBreakdown?.[item.key] ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="evidence-empty">No score breakdown is available for this run.</p>
+                )}
               </div>
               {selected?.candidateKind ? (
                 <div className="field-block">
@@ -254,37 +424,13 @@ export function ReconciliationDetailModal({
                 </div>
               ) : null}
               <div className="field-block">
-                <div className="fb-label">Reason</div>
+                <div className="fb-label">Detail</div>
                 <div className="fb-value">{selected?.explanation ?? run.summary ?? REASON_COPY[run.status]}</div>
               </div>
               <div className="field-block">
                 <div className="fb-label">Next action</div>
                 <div className="fb-value">{run.nextAction}</div>
               </div>
-              {selected?.reviewPayload?.required ? (
-                <div className="field-block">
-                  <div className="fb-label">Human review</div>
-                  <div className="fb-value">
-                    {selected.reviewPayload.primaryQuestion ?? "This case requires human review."}
-                    {selected.reviewPayload.blockers.length > 0 ? (
-                      <div className="chip-row">
-                        {selected.reviewPayload.blockers.map((flag) => (
-                          <span key={flag} className="chip plain">
-                            {formatCode(flag)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {selected.reviewPayload.suggestedActions.length > 0 ? (
-                      <ul className="suggested-actions">
-                        {selected.reviewPayload.suggestedActions.map((action) => (
-                          <li key={action}>{action}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
             </>
           ) : null}
 
@@ -302,14 +448,14 @@ export function ReconciliationDetailModal({
                   className="primary-button"
                   onClick={() => setShowCompare(true)}
                   disabled={!canCompare}
-                  title={canCompare ? "View the invoice and payment proof side by side" : "Both an invoice and a payment proof file are needed to compare"}
+                  title={canCompare ? "View source documents side by side" : "A source file is needed to compare"}
                 >
-                  Compare invoice ↔ proof
+                  View Source Documents
                 </button>
               </div>
               <div className="evidence-grid">
                 <div className="evidence-col">
-                  <h4>Invoice</h4>
+                  <h4>Expected Origin: Invoice</h4>
                   {invoice ? (
                     <dl>
                       <div>
@@ -351,7 +497,7 @@ export function ReconciliationDetailModal({
                 </div>
 
                 <div className="evidence-col">
-                  <h4>Payment Proof</h4>
+                  <h4>Supporting Evidence: Payment Proof</h4>
                   {proof ? (
                     <dl>       
                       <div>
@@ -393,7 +539,7 @@ export function ReconciliationDetailModal({
                 </div>
 
                 <div className="evidence-col">
-                  <h4>Bank Statement Row</h4>
+                  <h4>Target to Explain: Bank Statement Row</h4>
                   {bank ? (
                     <dl>
                       <div>
@@ -417,7 +563,7 @@ export function ReconciliationDetailModal({
                       </div>
                       <div>
                         <dt>Reference</dt>
-                        <dd className="num">{bank.referenceNo ?? bank.normalizedReference ?? "—"}</dd>
+                        <dd className="num">{bankRefLabel}</dd>
                       </div>
                     </dl>
                   ) : (
@@ -434,44 +580,38 @@ export function ReconciliationDetailModal({
               <div className="signals">
                 <h4>Match signals</h4>
                 {invoice && (proof || bank) ? (
-                  <>
-                    <div className="signal-row">
-                      <span className="sr-name">Reference</span>
-                      <span className="sr-value num">
-                        {invoice.paymentReference.normalized ?? "—"}
-                        {" vs "}
-                        {proof?.financialPayload.reference.normalized ?? bank?.normalizedReference ?? "—"}
-                      </span>
+                  <div className="signal-groups">
+                    <div>
+                      <h5>Bank ↔ Proof</h5>
+                      <div className="signal-row">
+                        <span className="sr-name">Amount</span>
+                        <span className="sr-value num">{bankAmountLabel} vs {proof ? formatMoney(proof.financialPayload.paidAmount) : "—"}</span>
+                      </div>
+                      <div className="signal-row">
+                        <span className="sr-name">Date</span>
+                        <span className="sr-value num">{bank?.bookingDate ?? "—"} vs {proof?.financialPayload.paymentDate ?? "—"}</span>
+                      </div>
+                      <div className="signal-row">
+                        <span className="sr-name">Name</span>
+                        <span className="sr-value">{bank?.debtorNormalizedName ?? bank?.debtorName ?? "—"} vs {proof?.financialPayload.debtor.normalizedName ?? proof?.financialPayload.debtor.name ?? "—"}</span>
+                      </div>
                     </div>
-                    <div className="signal-row">
-                      <span className="sr-name">Name</span>
-                      <span className="sr-value">
-                        {invoice.debtor.normalizedName ?? invoice.debtor.name ?? "—"}
-                        {" vs "}
-                        {proof?.financialPayload.debtor.normalizedName ??
-                          bank?.debtorNormalizedName ??
-                          bank?.debtorName ??
-                          "—"}
-                      </span>
+                    <div>
+                      <h5>Proof ↔ Invoice</h5>
+                      <div className="signal-row">
+                        <span className="sr-name">Reference</span>
+                        <span className="sr-value num">{proof?.financialPayload.reference.normalized ?? "—"} vs {invoice.paymentReference.normalized ?? "—"}</span>
+                      </div>
+                      <div className="signal-row">
+                        <span className="sr-name">Amount</span>
+                        <span className="sr-value num">{proof ? formatMoney(proof.financialPayload.paidAmount) : "—"} vs {formatMoney(invoice.amountDue)}</span>
+                      </div>
+                      <div className="signal-row">
+                        <span className="sr-name">Name</span>
+                        <span className="sr-value">{proof?.financialPayload.debtor.normalizedName ?? proof?.financialPayload.debtor.name ?? "—"} vs {invoice.debtor.normalizedName ?? invoice.debtor.name ?? "—"}</span>
+                      </div>
                     </div>
-                    <div className="signal-row">
-                      <span className="sr-name">Amount</span>
-                      <span className="sr-value num">
-                        {formatMoney(invoice.amountDue)}
-                        {" expected vs "}
-                        {formatMoney(receivedAmount(run))}
-                        {" received"}
-                      </span>
-                    </div>
-                    <div className="signal-row">
-                      <span className="sr-name">Date</span>
-                      <span className="sr-value num">
-                        {proof?.financialPayload.paymentDate ?? "—"}
-                        {" vs "}
-                        {bank?.bookingDate ?? "—"}
-                      </span>
-                    </div>
-                  </>
+                  </div>
                 ) : (
                   <p className="evidence-empty">Not enough matched records to compare signals.</p>
                 )}
@@ -510,61 +650,63 @@ export function ReconciliationDetailModal({
 
           {tab === "fx" ? (
             <>
-              {selected?.bestFxScenario ? (
+              {fxScenario ? (
                 <>
                   <div className="fx-scenario selected">
                     <div className="fx-head">
-                      <span className="fx-basis">{fxBasisLabel(selected.bestFxScenario.basis)}</span>
+                      <span className="fx-basis">{fxBasisLabel(fxScenario.basis)}</span>
                       <span className="chip success">Selected</span>
                     </div>
-                    <dl className="fx-grid">
-                      <div>
-                        <dt>Rate</dt>
-                        <dd className="num">{selected.bestFxScenario.rate}</dd>
+                    <div className="fx-flow">
+                      <div className="fx-step">
+                        <span>Invoice Amount (Foreign)</span>
+                        <strong className="num">{formatMoney(fxScenario.foreignAmount)}</strong>
                       </div>
-                      <div>
-                        <dt>Rate date</dt>
-                        <dd className="num">{selected.bestFxScenario.rateDate ?? "—"}</dd>
+                      <div className="fx-step">
+                        <span>Applied Rate</span>
+                        <strong className="num">x {fxScenario.rate} ({fxBasisLabel(fxScenario.basis)})</strong>
                       </div>
-                      <div>
-                        <dt>Expected local</dt>
-                        <dd className="num">{formatMoney(selected.bestFxScenario.expectedLocalAmount)}</dd>
+                      <div className="fx-step">
+                        <span>Expected Bank Amount (Local)</span>
+                        <strong className="num">{formatMoney(fxScenario.expectedLocalAmount)}</strong>
                       </div>
-                      <div>
-                        <dt>Foreign amount</dt>
-                        <dd className="num">{formatMoney(selected.bestFxScenario.foreignAmount)}</dd>
+                      <div className="fx-step">
+                        <span>Actual Bank Amount (Local)</span>
+                        <strong className="num">{formatMoney(actualBankAmount)}</strong>
                       </div>
-                      <div>
-                        <dt>Residual</dt>
-                        <dd className="num">{selected.bestFxScenario.residualAmount}</dd>
+                      <div className="fx-step fx-difference">
+                        <span>Unexplained Difference</span>
+                        <strong className="num">{fxScenario.residualAmount} ({formatPercent(fxScenario.residualPercent)})</strong>
                       </div>
-                      <div>
-                        <dt>Residual %</dt>
-                        <dd className="num">{formatPercent(selected.bestFxScenario.residualPercent)}</dd>
-                      </div>
-                      {selected.bestFxScenario.fxSourceKind ? (
+                    </div>
+                    <dl className="fx-grid fx-meta-grid">
+                      {fxScenario.fxSourceKind ? (
                         <div>
                           <dt>FX source</dt>
-                          <dd>{fxSourceKindLabel(selected.bestFxScenario.fxSourceKind)}</dd>
+                          <dd>{fxSourceKindLabel(fxScenario.fxSourceKind)}</dd>
                         </div>
                       ) : null}
-                      {fxProviderLabel(selected.bestFxScenario.providerId) ? (
+                      {fxProviderLabel(fxScenario.providerId) ? (
                         <div>
                           <dt>Provider</dt>
-                          <dd>{fxProviderLabel(selected.bestFxScenario.providerId)}</dd>
+                          <dd>{fxProviderLabel(fxScenario.providerId)}</dd>
                         </div>
                       ) : null}
-                      {selected.bestFxScenario.spreadMargin ? (
+                      <div>
+                        <dt>Rate date</dt>
+                        <dd className="num">{fxScenario.rateDate ?? "—"}</dd>
+                      </div>
+                      {fxScenario.spreadMargin ? (
                         <div>
                           <dt>Spread margin</dt>
-                          <dd className="num">{formatPercent(selected.bestFxScenario.spreadMargin)}</dd>
+                          <dd className="num">{formatPercent(fxScenario.spreadMargin)}</dd>
                         </div>
                       ) : null}
                     </dl>
-                    <p className="fx-source">{fxSourceLabel(selected.bestFxScenario.rateSource)}</p>
+                    <p className="fx-source">{fxSourceLabel(fxScenario.rateSource)}</p>
                   </div>
                   <div className="fx-note">
-                    Selected basis: {fxBasisLabel(selected.bestFxScenario.basis)} produced the lowest residual
+                    Selected basis: {fxBasisLabel(fxScenario.basis)} produced the lowest unexplained difference
                     {selected.residual ? ` (band: ${formatCode(selected.residual.band)})` : ""}.
                   </div>
                 </>
@@ -721,7 +863,7 @@ export function ReconciliationDetailModal({
                   </dl>
                   {selected.auditTrail.reasonCodes.length > 0 ? (
                     <div className="audit-section">
-                      <span className="audit-section-label">Reason codes</span>
+                      <span className="audit-section-label">System Flags</span>
                       <div className="chip-row">
                         {selected.auditTrail.reasonCodes.map((code) => (
                           <span key={code} className="chip plain">
@@ -733,7 +875,7 @@ export function ReconciliationDetailModal({
                   ) : null}
                   {selected.auditTrail.hardReviewFlags.length > 0 ? (
                     <div className="audit-section">
-                      <span className="audit-section-label">Hard review flags</span>
+                      <span className="audit-section-label">System Flags Requiring Review</span>
                       <div className="chip-row">
                         {selected.auditTrail.hardReviewFlags.map((flag) => (
                           <span key={flag} className="chip review">
@@ -775,20 +917,73 @@ export function ReconciliationDetailModal({
                     <h4>Reconciliation Report</h4>
                     <span className="chip success">Generated</span>
                   </div>
-                  <dl>
-                    <div>
-                      <dt>Matched invoice</dt>
-                      <dd className="num">{selected?.expectedPaymentId ?? "—"}</dd>
+                  <div className="report-summary">
+                    <p style={{ fontSize: "0.9rem", color: "var(--ink-invert)", marginBottom: "16px", lineHeight: 1.5 }}>
+                      {decisionNarrative}
+                    </p>
+                    
+                    <div style={{ marginBottom: "16px" }}>
+                      <h5 style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "rgba(245, 248, 242, 0.45)", marginBottom: "8px", margin: "0 0 8px 0" }}>System Decision</h5>
+                      <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <div>
+                          <dt>Status</dt>
+                          <dd><StatusChip status={run.status} /></dd>
+                        </div>
+                        {selected?.candidateKind && (
+                          <div>
+                            <dt>Match Type</dt>
+                            <dd>{candidateKindLabel(selected.candidateKind)}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt>Match Score</dt>
+                          <dd className="num">{row.scoreLabel}</dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div>
-                      <dt>Matched bank transaction</dt>
-                      <dd className="num">{selected?.bankTransactionId ?? "—"}</dd>
+
+                    <div style={{ marginBottom: "16px" }}>
+                      <h5 style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "rgba(245, 248, 242, 0.45)", marginBottom: "8px", margin: "0 0 8px 0" }}>Matched Entities</h5>
+                      <dl style={{ display: "grid", gap: "10px" }}>
+                        <div>
+                          <dt>Invoice</dt>
+                          <dd className="num">{selected?.expectedPaymentId ?? "—"} {row.invoiceLabel !== "—" ? <span style={{ color: "rgba(245, 248, 242, 0.5)" }}>({row.invoiceLabel})</span> : ""}</dd>
+                        </div>
+                        <div>
+                          <dt>Bank Transaction</dt>
+                          <dd className="num">{selected?.bankTransactionId ?? "—"} <span style={{ color: "rgba(245, 248, 242, 0.5)" }}>({bankAmountLabel})</span></dd>
+                        </div>
+                        <div>
+                          <dt>Payment Proof</dt>
+                          <dd className="num">{selected?.proofId ?? run.proofId ?? "—"}</dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div>
-                      <dt>Matched payment proof</dt>
-                      <dd className="num">{selected?.proofId ?? run.proofId ?? "—"}</dd>
-                    </div>
-                  </dl>
+
+                    {selected?.bestFxScenario && (
+                      <div>
+                        <h5 style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "rgba(245, 248, 242, 0.45)", marginBottom: "8px", margin: "0 0 8px 0" }}>Financial Summary</h5>
+                        <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                          <div>
+                            <dt>Invoice Amount</dt>
+                            <dd className="num">{formatMoney(selected.bestFxScenario.foreignAmount)}</dd>
+                          </div>
+                          <div>
+                            <dt>Expected Local Amount</dt>
+                            <dd className="num">{formatMoney(selected.bestFxScenario.expectedLocalAmount)} <span style={{ color: "rgba(245, 248, 242, 0.5)", fontSize: "0.75rem" }}>(Rate: {selected.bestFxScenario.rate})</span></dd>
+                          </div>
+                          <div>
+                            <dt>Actual Local Amount</dt>
+                            <dd className="num">{formatMoney(actualBankAmount)}</dd>
+                          </div>
+                          <div>
+                            <dt>Unexplained Difference</dt>
+                            <dd className="num">{selected.bestFxScenario.residualAmount} ({formatPercent(selected.bestFxScenario.residualPercent)})</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : null}
 
@@ -841,10 +1036,10 @@ export function ReconciliationDetailModal({
           {actionError ? <span className="action-confirm error">{actionError}</span> : null}
           {tab !== "overview" ? (
             <button type="button" className="secondary-button" onClick={() => setTab("overview")}>
-              Back to Overview
+              Back to Summary
             </button>
           ) : null}
-          {ACTIONS[run.status].map((label) => (
+          {availableActions.map((label) => (
             <button
               key={label}
               type="button"
@@ -860,10 +1055,11 @@ export function ReconciliationDetailModal({
 
       {showCompare ? (
         <DocumentCompare
-          title={`Compare · ${row.invoiceLabel}`}
+          title={`Source documents · ${bankRefLabel}`}
           panes={[
-            { label: "Invoice", documentId: invoiceFileId },
-            { label: "Payment Proof", documentId: proofFileId }
+            { label: "Bank Statement", documentId: bankFileId },
+            { label: "Payment Proof", documentId: proofFileId },
+            { label: "Invoice", documentId: invoiceFileId }
           ]}
           onClose={() => setShowCompare(false)}
         />

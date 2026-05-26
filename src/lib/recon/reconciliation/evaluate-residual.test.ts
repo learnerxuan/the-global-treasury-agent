@@ -54,6 +54,55 @@ describe("evaluateAmountResidual", () => {
     expect(result.data.exceedsHardReviewThreshold).toBe(true);
   });
 
+  it("uses SME percentage tolerance to allow a residual above the enterprise threshold", () => {
+    const result = evaluateAmountResidual({
+      fxScenarios: [fx("payment_date", "-1275.00", 0.03)],
+      policy: {
+        ...DEFAULT_POLICY,
+        smeConfig: {
+          mode: "percentage",
+          percentageValue: 0.05,
+          fixedValue: "0.00"
+        }
+      }
+    });
+    if (!result.ok) return;
+    expect(result.data.band).toBe("SIGNIFICANT_VARIANCE");
+    expect(result.data.exceedsHardReviewThreshold).toBe(false);
+  });
+
+  it("uses SME fixed tolerance when percentage tolerance is not selected", () => {
+    const result = evaluateAmountResidual({
+      fxScenarios: [fx("payment_date", "-200.00", 0.04, "5000.00")],
+      policy: {
+        ...DEFAULT_POLICY,
+        smeConfig: {
+          mode: "fixed",
+          percentageValue: 0.02,
+          fixedValue: "250.00"
+        }
+      }
+    });
+    if (!result.ok) return;
+    expect(result.data.exceedsHardReviewThreshold).toBe(false);
+  });
+
+  it("uses the more forgiving threshold for SME hybrid tolerance", () => {
+    const result = evaluateAmountResidual({
+      fxScenarios: [fx("payment_date", "-300.00", 0.06, "5000.00")],
+      policy: {
+        ...DEFAULT_POLICY,
+        smeConfig: {
+          mode: "hybrid",
+          percentageValue: 0.02,
+          fixedValue: "350.00"
+        }
+      }
+    });
+    if (!result.ok) return;
+    expect(result.data.exceedsHardReviewThreshold).toBe(false);
+  });
+
   it("bands a >5% residual as unexplained", () => {
     const result = evaluateAmountResidual({
       fxScenarios: [fx("payment_date", "-3000.00", 0.07)],

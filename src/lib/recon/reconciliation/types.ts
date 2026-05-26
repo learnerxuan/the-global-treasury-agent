@@ -7,6 +7,7 @@ import type {
   NormalizedPaymentProofRecord
 } from "../types";
 import type { FxRateSource } from "./fx-table";
+import type { SmeToleranceConfig } from "./policy";
 
 // ─── Tool result envelope ───────────────────────────────────────────────────
 // Every Reconciliation Tool returns this so the orchestrator can observe
@@ -332,6 +333,7 @@ export type ReconciliationResult = {
   candidateKind?: CandidateKind;
   allocations?: PaymentAllocation[];
   score: number;
+  scoreBreakdown?: ScoreBreakdown;
   reasonCodes: ReasonCode[];
   hardReviewFlags: HardReviewFlag[];
   bestFxScenario?: FxScenarioResult;
@@ -384,6 +386,7 @@ export type ReconciliationOrchestratorOptions = {
   fxProvider?: import("./fx-provider").FxRateProvider;
   paymentApplicationStore?: import("./stores").PaymentApplicationStore;
   counterpartyIdentityStore?: import("./stores").CounterpartyIdentityStore;
+  smeConfig?: SmeToleranceConfig;
 };
 
 // Re-export commonly used input types for convenience within this module.

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NextResponse } from "next/server";
+import { approveReconciliationRun, rejectReconciliationRun } from "../../../../src/server/reconciliation/waiting-reconciliation";
 
 export const runtime = "nodejs";
 
@@ -40,10 +41,17 @@ export async function POST(request: Request) {
     await mkdir(dir, { recursive: true });
     const path = join(dir, `${actionId}.json`);
     await writeFile(path, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    const completedRun = 
+      body.action === "APPROVE_MATCH" 
+        ? await approveReconciliationRun(body.runId) 
+        : body.action === "REJECT_MATCH" 
+          ? await rejectReconciliationRun(body.runId) 
+          : null;
 
     return NextResponse.json({
       ok: true,
       action: record,
+      completedRun,
       message: "Action saved to local audit log."
     });
   } catch (error) {
