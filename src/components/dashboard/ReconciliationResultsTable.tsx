@@ -35,19 +35,28 @@ export function ReconciliationResultsTable({
   return (
     <section className="results-panel" aria-label="Reconciliation results">
       <div className="results-toolbar">
-        <h2>Reconciliation Results</h2>
-        <select
-          className="status-filter"
-          value={statusFilter}
-          onChange={(event) => onStatusFilterChange(event.target.value as RunStatus | "ALL")}
-          aria-label="Filter by status"
-        >
-          {FILTERS.map((filter) => (
-            <option key={filter.value} value={filter.value}>
-              {filter.label}
-            </option>
-          ))}
-        </select>
+        <div>
+          <p className="eyebrow">Case queue</p>
+          <h2>Reconciliation results</h2>
+          <p className="results-subcopy">
+            Open a case to inspect evidence comparison, allocation, FX basis, trust level, and audit trail.
+          </p>
+        </div>
+        <div className="results-controls">
+          <span className="visible-count num">{visibleRows.length} shown</span>
+          <select
+            className="status-filter"
+            value={statusFilter}
+            onChange={(event) => onStatusFilterChange(event.target.value as RunStatus | "ALL")}
+            aria-label="Filter by status"
+          >
+            {FILTERS.map((filter) => (
+              <option key={filter.value} value={filter.value}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {state === "loading" ? (

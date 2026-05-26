@@ -19,6 +19,18 @@ const STATUS_TONE: Record<UploadStatus, string> = {
   error: "error"
 };
 
+const ROLE_ICON: Record<DocumentRole, string> = {
+  invoice: "INV",
+  bank_statement: "BNK",
+  payment_proof: "PRF"
+};
+
+const ROLE_COPY: Record<DocumentRole, string> = {
+  invoice: "Expected payment records",
+  bank_statement: "Settlement source of truth",
+  payment_proof: "Customer remittance evidence"
+};
+
 type UploadCardProps = {
   role: DocumentRole;
   title: string;
@@ -54,9 +66,14 @@ export function UploadCard({
   return (
     <form className={`upload-card ${role}`} onSubmit={onSubmit}>
       <div className="card-top">
-        <div>
-          <h3>{title}</h3>
-          <p className="file-hint">{FILE_HINT}</p>
+        <div className="upload-title">
+          <span className="upload-icon" aria-hidden="true">
+            {ROLE_ICON[role]}
+          </span>
+          <div>
+            <h3>{title}</h3>
+            <p className="file-hint">{ROLE_COPY[role]}</p>
+          </div>
         </div>
         <span className={`chip ${STATUS_TONE[status]}`}>{STATUS_LABEL[status]}</span>
       </div>
@@ -66,7 +83,7 @@ export function UploadCard({
           +
         </span>
         <span className="dz-title">Choose files</span>
-        <span className="dz-copy">{files.length === 0 ? "No files selected" : `${files.length} file(s) selected`}</span>
+        <span className="dz-copy">{files.length === 0 ? FILE_HINT : `${files.length} file(s) staged for extraction`}</span>
         <input type="file" multiple accept={accept} onChange={handleChange} />
       </label>
 
