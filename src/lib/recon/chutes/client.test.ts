@@ -80,3 +80,33 @@ describe("ChutesClient retry/backoff", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
+
+describe("ChutesClient provider wiring", () => {
+  it("uses Bearer auth and the Morpheus base URL/model when provider=morpheus", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok("OK"));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new ChutesClient({ provider: "morpheus", apiKey: "sk-test", retryBaseDelayMs: 1, maxAttempts: 1 });
+    await client.chat({ messages: [{ role: "user", content: "hi" }] });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.mor.org/api/v1/chat/completions");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer sk-test");
+    expect(headers["X-API-Key"]).toBeUndefined();
+    expect(JSON.parse(init.body as string).model).toBe("llama-3.3-70b");
+  });
+
+  it("uses X-API-Key auth when provider=chutes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ok("OK"));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const client = new ChutesClient({ provider: "chutes", apiKey: "chutes-key", retryBaseDelayMs: 1, maxAttempts: 1 });
+    await client.chat({ messages: [{ role: "user", content: "hi" }] });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-API-Key"]).toBe("chutes-key");
+    expect(headers.Authorization).toBeUndefined();
+  });
+});

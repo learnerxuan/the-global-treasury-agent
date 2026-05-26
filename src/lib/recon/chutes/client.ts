@@ -3,15 +3,55 @@ export type ChutesChatMessage = {
   content: string;
 };
 
+export type LlmProvider = "chutes" | "nvidia" | "morpheus";
+
 export type ChutesClientOptions = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
-  provider?: "chutes" | "nvidia";
+  provider?: LlmProvider;
   /** Total attempts per chat call, including the first. Defaults to 4. */
   maxAttempts?: number;
   /** Base delay (ms) for exponential backoff between retries. Defaults to 600. */
   retryBaseDelayMs?: number;
+};
+
+type ProviderConfig = {
+  keyEnv: string;
+  baseUrlEnv: string;
+  modelEnv: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  auth: "bearer" | "x-api-key";
+};
+
+// Per-provider wiring. All three speak the OpenAI chat-completions shape; they
+// differ only in base URL, default model, env var names, and auth header.
+const PROVIDER_CONFIG: Record<LlmProvider, ProviderConfig> = {
+  chutes: {
+    keyEnv: "CHUTES_API_KEY",
+    baseUrlEnv: "CHUTES_BASE_URL",
+    modelEnv: "CHUTES_MODEL",
+    defaultBaseUrl: "https://llm.chutes.ai/v1",
+    defaultModel: "default:latency",
+    auth: "x-api-key"
+  },
+  nvidia: {
+    keyEnv: "NVIDIA_API_KEY",
+    baseUrlEnv: "NVIDIA_BASE_URL",
+    modelEnv: "NVIDIA_MODEL",
+    defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
+    defaultModel: "meta/llama-3.3-70b-instruct",
+    auth: "bearer"
+  },
+  morpheus: {
+    keyEnv: "MORPHEUS_API_KEY",
+    baseUrlEnv: "MORPHEUS_BASE_URL",
+    modelEnv: "MORPHEUS_MODEL",
+    defaultBaseUrl: "https://api.mor.org/api/v1",
+    defaultModel: "llama-3.3-70b",
+    auth: "bearer"
+  }
 };
 
 export type ChutesChatOptions = {
@@ -34,43 +74,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Pick a provider from whichever key is configured when LLM_PROVIDER is unset.
+// Preference order: morpheus, then chutes, then nvidia — so commenting out the
+// MORPHEUS_API_KEY automatically falls back to a previously-configured provider.
+function detectProvider(): LlmProvider {
+  if (readLocalEnvValue("MORPHEUS_API_KEY")) return "morpheus";
+  if (readLocalEnvValue("CHUTES_API_KEY") && !readLocalEnvValue("NVIDIA_API_KEY")) return "chutes";
+  return "nvidia";
+}
+
 export class ChutesClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
-  private readonly provider: "chutes" | "nvidia";
+  private readonly provider: LlmProvider;
+  private readonly auth: "bearer" | "x-api-key";
   private readonly maxAttempts: number;
   private readonly retryBaseDelayMs: number;
 
   constructor(options: ChutesClientOptions = {}) {
     const provider =
-      options.provider ??
-      (readLocalEnvValue("LLM_PROVIDER") as "chutes" | "nvidia" | undefined) ??
-      (readLocalEnvValue("CHUTES_API_KEY") && !readLocalEnvValue("NVIDIA_API_KEY") ? "chutes" : "nvidia");
+      options.provider ?? (readLocalEnvValue("LLM_PROVIDER") as LlmProvider | undefined) ?? detectProvider();
 
-    const apiKey =
-      options.apiKey ??
-      (provider === "nvidia" ? readLocalEnvValue("NVIDIA_API_KEY") : readLocalEnvValue("CHUTES_API_KEY"));
+    const config = PROVIDER_CONFIG[provider];
+
+    const apiKey = options.apiKey ?? readLocalEnvValue(config.keyEnv);
     if (!apiKey) {
       throw new Error(
-        provider === "nvidia"
-          ? "NVIDIA_API_KEY is required to run AI extraction with NVIDIA. Set LLM_PROVIDER=nvidia and NVIDIA_API_KEY in .env.local, then restart the dev server."
-          : "CHUTES_API_KEY is required to run AI extraction with Chutes. Set LLM_PROVIDER=chutes and CHUTES_API_KEY in .env.local, then restart the dev server."
+        `${config.keyEnv} is required to run AI extraction with ${provider}. Set LLM_PROVIDER=${provider} and ${config.keyEnv} in .env.local, then restart the dev server.`
       );
     }
 
     this.provider = provider;
+    this.auth = config.auth;
     this.apiKey = apiKey;
-    this.baseUrl =
-      options.baseUrl ??
-      (provider === "nvidia"
-        ? readLocalEnvValue("NVIDIA_BASE_URL") ?? "https://integrate.api.nvidia.com/v1"
-        : readLocalEnvValue("CHUTES_BASE_URL") ?? "https://llm.chutes.ai/v1");
-    this.model =
-      options.model ??
-      (provider === "nvidia"
-        ? readLocalEnvValue("NVIDIA_MODEL") ?? "meta/llama-3.3-70b-instruct"
-        : readLocalEnvValue("CHUTES_MODEL") ?? "default:latency");
+    this.baseUrl = options.baseUrl ?? readLocalEnvValue(config.baseUrlEnv) ?? config.defaultBaseUrl;
+    this.model = options.model ?? readLocalEnvValue(config.modelEnv) ?? config.defaultModel;
 
     const envAttempts = Number(readLocalEnvValue("LLM_MAX_ATTEMPTS"));
     this.maxAttempts = Math.max(1, options.maxAttempts ?? (Number.isFinite(envAttempts) && envAttempts > 0 ? envAttempts : 6));
@@ -90,7 +129,7 @@ export class ChutesClient {
 
   async chat(options: ChutesChatOptions): Promise<string> {
     const authHeader =
-      this.provider === "nvidia"
+      this.auth === "bearer"
         ? { Authorization: `Bearer ${this.apiKey}` }
         : { "X-API-Key": this.apiKey };
 
