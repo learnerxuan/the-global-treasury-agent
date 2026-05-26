@@ -11,6 +11,7 @@ import {
   fxBasisLabel,
   fxProviderLabel,
   fxSourceKindLabel,
+  myrEquivalent,
   statusMeta
 } from "./adapter";
 import type { ReconciliationRun, RunStatus } from "./types";
@@ -106,6 +107,23 @@ describe("dashboard adapter", () => {
     expect(row.scoreLabel).toMatch(/^\d+$/);
     // The engine emits an Agent 2 timeline that the modal renders.
     expect(run.reconciliation.timeline.length).toBeGreaterThan(0);
+  });
+
+  it("adds a MYR home-currency preview under a foreign amount using the engine's selected rate", () => {
+    const run = runFromBatch(fxVarianceBatch);
+    const row = buildDisplayRow(run);
+    // Invoice is foreign (USD) → a derived "≈ RM …" preview should appear.
+    expect(row.expectedAmountMyr).toMatch(/^≈ RM [\d,]+$/);
+    // The received amount is already MYR → no redundant preview.
+    expect(row.receivedAmountMyr).toBeNull();
+  });
+
+  it("never fabricates a MYR preview for MYR amounts or currencies the rate does not apply to", () => {
+    const run = runFromBatch(fxVarianceBatch);
+    // Already MYR → no preview.
+    expect(myrEquivalent({ value: "1000.00", currency: "MYR" }, run)).toBeNull();
+    // The selected USD rate must not be applied to an unrelated currency.
+    expect(myrEquivalent({ value: "1000.00", currency: "JPY" }, run)).toBeNull();
   });
 
   it("handles an unmatched run without throwing and degrades labels gracefully", () => {

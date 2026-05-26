@@ -100,8 +100,14 @@ export function ReconciliationResultsTable({
                   </td>
                   <td className="num">{row.invoiceLabel}</td>
                   <td className="col-customer">{row.customerLabel}</td>
-                  <td className="num">{row.expectedAmountLabel}</td>
-                  <td className="num">{row.receivedAmountLabel}</td>
+                  <td className="num">
+                    {row.expectedAmountLabel}
+                    {row.expectedAmountMyr ? <div className="myr-sub">{row.expectedAmountMyr}</div> : null}
+                  </td>
+                  <td className="num">
+                    {row.receivedAmountLabel}
+                    {row.receivedAmountMyr ? <div className="myr-sub">{row.receivedAmountMyr}</div> : null}
+                  </td>
                   <td>{row.fxBasisLabel}</td>
                   <td className="num">{row.scoreLabel}</td>
                   <td>
@@ -134,6 +140,13 @@ export function ReconciliationResultsTable({
                   <span className="arrow">→</span>
                   {row.receivedAmountLabel}
                 </div>
+                {row.expectedAmountMyr || row.receivedAmountMyr ? (
+                  <div className="rc-amounts-myr myr-sub num">
+                    {row.expectedAmountMyr ?? ""}
+                    {row.expectedAmountMyr && row.receivedAmountMyr ? <span className="arrow">→</span> : null}
+                    {row.receivedAmountMyr ?? ""}
+                  </div>
+                ) : null}
                 <button
                   className="row-action"
                   type="button"

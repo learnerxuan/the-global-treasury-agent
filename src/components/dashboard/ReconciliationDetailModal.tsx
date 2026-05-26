@@ -13,6 +13,7 @@ import {
   fxProviderLabel,
   fxSourceKindLabel,
   fxSourceLabel,
+  myrEquivalent,
   receivedAmount,
   statusMeta,
   timelineActorMeta
@@ -124,6 +125,12 @@ export function ReconciliationDetailModal({
   const proof = findProof(run);
   const bank = findBank(run);
   const meta = statusMeta(run.status);
+  // For non-confirmed cases the invoice/bank shown are the closest candidate the
+  // engine evaluated and rejected — not a committed match. Flag that in the UI.
+  const isUnconfirmed = run.status === "NEEDS_REVIEW" || run.status === "UNMATCHED" || run.status === "NO_PROOF_RECORD";
+  const invoiceMyr = invoice ? myrEquivalent(invoice.amountDue, run) : null;
+  const proofMyr = proof ? myrEquivalent(proof.financialPayload.paidAmount, run) : null;
+  const bankMyr = bank ? myrEquivalent(bank.netCreditAmount ?? bank.amount, run) : null;
 
   function actionCode(label: string): string {
     switch (label) {
@@ -276,6 +283,12 @@ export function ReconciliationDetailModal({
 
           {tab === "evidence" ? (
             <>
+              {isUnconfirmed ? (
+                <p className="evidence-note">
+                  Closest candidate considered — not a confirmed match. The records below are what the engine
+                  evaluated for this proof; the signals show why it was not auto-matched.
+                </p>
+              ) : null}
               <div className="evidence-grid">
                 <div className="evidence-col">
                   <h4>Invoice</h4>
@@ -291,7 +304,14 @@ export function ReconciliationDetailModal({
                       </div>
                       <div>
                         <dt>Amount due</dt>
-                        <dd className="num">{formatMoney(invoice.amountDue)}</dd>
+                        <dd className="num">
+                          {formatMoney(invoice.amountDue)}
+                          {invoiceMyr ? (
+                            <span className="myr-sub" title={`${invoiceMyr.rate} · ${invoiceMyr.sourceLabel}`}>
+                              {invoiceMyr.text}
+                            </span>
+                          ) : null}
+                        </dd>
                       </div>
                       <div>
                         <dt>Issue date</dt>
@@ -317,7 +337,14 @@ export function ReconciliationDetailModal({
                       </div>
                       <div>
                         <dt>Paid amount</dt>
-                        <dd className="num">{formatMoney(proof.financialPayload.paidAmount)}</dd>
+                        <dd className="num">
+                          {formatMoney(proof.financialPayload.paidAmount)}
+                          {proofMyr ? (
+                            <span className="myr-sub" title={`${proofMyr.rate} · ${proofMyr.sourceLabel}`}>
+                              {proofMyr.text}
+                            </span>
+                          ) : null}
+                        </dd>
                       </div>
                       <div>
                         <dt>Payment date</dt>
@@ -347,7 +374,14 @@ export function ReconciliationDetailModal({
                       </div>
                       <div>
                         <dt>Amount</dt>
-                        <dd className="num">{formatMoney(bank.netCreditAmount ?? bank.amount)}</dd>
+                        <dd className="num">
+                          {formatMoney(bank.netCreditAmount ?? bank.amount)}
+                          {bankMyr ? (
+                            <span className="myr-sub" title={`${bankMyr.rate} · ${bankMyr.sourceLabel}`}>
+                              {bankMyr.text}
+                            </span>
+                          ) : null}
+                        </dd>
                       </div>
                       <div>
                         <dt>Booking date</dt>
@@ -543,6 +577,10 @@ export function ReconciliationDetailModal({
                   const trust = selected.evidenceTrust;
                   const meta = evidenceTrustMeta(trust.level);
                   const rank = trustRank(trust.level);
+                  // A field that appears in `issues` failed the confidence floor,
+                  // so it is NOT verified — only show fields that actually passed.
+                  const issueFields = new Set(trust.issues.map((issue) => issue.field));
+                  const verifiedFields = trust.criticalFieldsChecked.filter((field) => !issueFields.has(field));
                   return (
                     <div className="trust-card">
                       <div className={`trust-hero ${meta.tone}`}>
@@ -577,11 +615,11 @@ export function ReconciliationDetailModal({
                         </div>
                       </div>
 
-                      {trust.criticalFieldsChecked.length > 0 ? (
+                      {verifiedFields.length > 0 ? (
                         <div className="trust-section">
                           <div className="trust-section-label">Verified critical fields</div>
                           <div className="chip-row">
-                            {trust.criticalFieldsChecked.map((field) => (
+                            {verifiedFields.map((field) => (
                               <span key={field} className="chip verified">
                                 {prettyField(field)}
                               </span>

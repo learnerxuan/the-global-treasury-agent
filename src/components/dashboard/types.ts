@@ -125,7 +125,9 @@ export type ReconciliationDisplayRow = {
   invoiceLabel: string;
   customerLabel: string;
   expectedAmountLabel: string;
+  expectedAmountMyr: string | null;
   receivedAmountLabel: string;
+  receivedAmountMyr: string | null;
   fxBasisLabel: string;
   scoreLabel: string;
   summary: string;

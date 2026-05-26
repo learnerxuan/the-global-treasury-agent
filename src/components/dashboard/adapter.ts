@@ -1,7 +1,10 @@
 // UI adapter: turns reconciliation run JSON into display-ready labels.
-// No money math happens here — values arrive already computed by the engine.
-// We only format strings for presentation.
+// Values arrive already computed by the engine; we only format for presentation.
+// The one exception is the home-currency (MYR) preview below foreign amounts,
+// which reuses the engine's own deterministic decimal multiply (no float math)
+// applied to the rate the engine already selected — never a fabricated rate.
 
+import { multiplyMoneyByRate } from "../../lib/recon/reconciliation/money";
 import type {
   AllocationReason,
   CandidateKind,
@@ -51,6 +54,35 @@ export function formatMoney(amount: MoneyLike): string {
     maximumFractionDigits: 2
   }).format(numeric);
   return `${currency} ${formatted}`.trim();
+}
+
+// The SME's home / settlement currency. Foreign amounts get a MYR preview.
+const HOME_CURRENCY = "MYR";
+
+function formatMyrApprox(value: string): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return `RM ${value}`;
+  return `RM ${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numeric)}`;
+}
+
+export type MyrEquivalent = { text: string; rate: string; sourceLabel: string };
+
+// A muted "≈ RM …" home-currency preview for a foreign amount, converted at the
+// exact rate the engine selected for this case. Returns null when the amount is
+// already MYR, when no rate is available, or when the selected rate applies to a
+// different currency (we never convert with a rate that doesn't belong to it).
+export function myrEquivalent(amount: MoneyLike, run: ReconciliationRun): MyrEquivalent | null {
+  if (!amount || amount.value === null || amount.value === undefined) return null;
+  if ((amount.currency ?? "") === HOME_CURRENCY) return null;
+  const scenario = run.selectedResult?.bestFxScenario;
+  if (!scenario || !scenario.rate) return null;
+  if (scenario.foreignAmount.currency !== amount.currency) return null;
+  const myr = multiplyMoneyByRate(amount.value, scenario.rate);
+  return {
+    text: `≈ ${formatMyrApprox(myr)}`,
+    rate: scenario.rate,
+    sourceLabel: fxSourceKindLabel(scenario.fxSourceKind)
+  };
 }
 
 export function fxBasisLabel(basis: string): string {
@@ -215,7 +247,9 @@ export function buildDisplayRow(run: ReconciliationRun): ReconciliationDisplayRo
     invoiceLabel,
     customerLabel: customerLabel(run),
     expectedAmountLabel,
+    expectedAmountMyr: myrEquivalent(invoice?.amountDue ?? null, run)?.text ?? null,
     receivedAmountLabel,
+    receivedAmountMyr: myrEquivalent(receivedAmount(run), run)?.text ?? null,
     fxBasisLabel: fxBasisText,
     scoreLabel,
     summary: run.summary,

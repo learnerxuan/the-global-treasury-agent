@@ -1122,6 +1122,37 @@ p {
   font-size: 0.84rem;
 }
 
+/* Home-currency (MYR) preview shown beneath a foreign amount. */
+.myr-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ink-3);
+  letter-spacing: 0.01em;
+}
+
+.rc-amounts-myr {
+  margin-top: 2px;
+}
+
+.rc-amounts-myr .arrow {
+  margin: 0 6px;
+  color: var(--ink-3);
+}
+
+.evidence-note {
+  margin: 0 0 12px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--review);
+  border-radius: var(--radius-sm);
+  background: var(--review-soft);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .signals {
   margin-top: 18px;
 }
