@@ -2,143 +2,155 @@
 
 ReconPilot is an agentic cross-border reconciliation prototype for the AI Marathon 2026 treasury problem statement.
 
-It lets a user upload:
-
-- invoices / expected payment records
-- local bank statements
-- payment proofs / transfer receipts
-
-The system extracts structured fields, normalizes records, stores waiting JSON records, then triggers Agent 2 when payment proofs arrive. Agent 2 matches payment proofs against invoices and bank statement rows, explains FX reasoning, generates reconciliation/discrepancy artifacts, and exposes human-review actions.
+The app lets a user upload invoices, bank statements, and payment proofs. It extracts structured payment data, normalizes records, stores local JSON runtime data, and runs a reconciliation workflow that explains matches, FX reasoning, discrepancies, and human-review actions.
 
 ## Current Capabilities
 
 - AI-assisted extraction for PDFs, images, CSV, XLSX, and text files.
 - Deterministic parsing and normalization for invoices, bank rows, payment proofs, names, dates, references, currencies, and amounts.
-- Reconciliation against both incoming credits and outgoing settlement/debit rows.
-- FX reasoning using proof rate, bank-recorded/implied rate, invoice date, payment date, and bank date, with a live Bank Negara Malaysia (BNM) rate provider plus a local fixture fallback.
-- Home-currency (MYR) preview shown beneath foreign amounts, converted at the rate the engine actually selected.
-- Dashboard with reconciliation results, evidence, FX reasoning, agent timeline, trust & audit, artifacts, and a debug console.
-- Local JSON output for debugging under `runtime/extracted/`.
-
----
+- Reconciliation against incoming credits and outgoing settlement or debit rows.
+- FX reasoning using proof rate, bank-recorded or implied rate, invoice date, payment date, and bank date.
+- Live Bank Negara Malaysia (BNM) FX lookup with local fixture fallback.
+- Home-currency MYR previews for foreign amounts.
+- Dashboard views for results, evidence, FX reasoning, agent timeline, trust and audit data, artifacts, and debugging.
+- Local JSON output for inspection under `runtime/`.
 
 ## System Requirements
 
-### Runtime / tooling
-
 | Requirement | Version | Notes |
-|---|---|---|
-| **Node.js** | **20.9 or newer** (LTS recommended) | Required by Next.js 16. Node 22 also works. |
-| **npm** | 10+ (ships with Node) | Or a compatible package manager. |
-| **OS** | Windows (PowerShell), macOS (Terminal), or Linux | Developed and tested on Windows 11 / PowerShell. |
+| --- | --- | --- |
+| Node.js | 20.9 or newer | Required by Next.js 16. Node 22 also works. |
+| npm | 10 or newer | Ships with current Node.js releases. |
+| Operating system | Windows, macOS, or Linux | Developed on Windows 11 with PowerShell. |
+| Network access | Required for install and best runtime results | `xlsx` installs from the SheetJS CDN; AI extraction and live FX lookup call external APIs. |
 
-### Network access
+No database is required. Runtime state is stored in local JSON files under `runtime/`.
 
-- **During `npm install`** — the `xlsx` dependency is pinned to the official SheetJS CDN tarball (`https://cdn.sheetjs.com/...`), not the npm registry. Your machine must be able to reach `cdn.sheetjs.com` when installing.
-- **At runtime** — AI extraction calls go to your configured LLM provider's API, and live FX lookups go to the Bank Negara Malaysia public API. Both gracefully degrade (extraction falls back to manual correction; FX falls back to a local fixture table) but work best online.
+## Main Dependencies
 
-### Key dependencies (installed via npm)
+Dependencies are installed automatically from `package.json`, but the most important ones are:
 
-These are pulled in automatically by `npm install`; listed here so you know what powers each feature:
+- `next`, `react`, and `react-dom` for the application framework and UI.
+- `zod` for schema validation.
+- `pdf-parse` for PDF text extraction.
+- `tesseract.js` and `@tesseract.js-data/eng` for OCR.
+- `read-excel-file` and `xlsx` for spreadsheet parsing.
+- `papaparse` for CSV parsing.
+- `date-fns` for date normalization.
+- `vitest`, `typescript`, and `tsx` for testing and developer tooling.
 
-- **next** 16, **react** / **react-dom** 19 — app framework and UI.
-- **zod** 3 — schema validation for all extracted records.
-- **pdf-parse** — PDF text-layer extraction.
-- **tesseract.js** + **@tesseract.js-data/eng** — OCR for images and scanned PDFs (English model is downloaded/cached on first use; no system Tesseract install needed).
-- **read-excel-file** and **xlsx** (SheetJS, patched 0.20.3 via CDN) — spreadsheet parsing.
-- **papaparse** — CSV parsing.
-- **date-fns** — date normalization.
-- **vitest** 3, **typescript** 5.8, **tsx** — testing and type tooling.
+## Local Setup
 
-No database is required — all state is written to local JSON files under `runtime/`.
+### 1. Clone or open the project
 
----
+From this repository, move into the Next.js app directory:
 
-## 1. Install
+```powershell
+cd the-global-treasury-agent
+```
 
-From the project root:
+If you already opened a terminal inside `the-global-treasury-agent`, you can skip this step.
+
+### 2. Install dependencies
+
+Use `npm ci` when `package-lock.json` is present and you want a reproducible install:
+
+```powershell
+npm ci
+```
+
+If you are actively changing dependencies, use:
 
 ```powershell
 npm install
 ```
 
-> If this fails on the `xlsx` step, it is almost always a network issue reaching `cdn.sheetjs.com`. Re-run once you have access.
+Note: the `xlsx` package is pinned to a SheetJS CDN tarball. If install fails while fetching `xlsx`, confirm that your machine can reach `https://cdn.sheetjs.com/`.
 
-## 2. Configure (LLM provider)
+### 3. Configure environment variables
 
-Create a `.env.local` file in the project root. **Do not commit this file** — it is gitignored.
+Create a `.env.local` file in the project root:
 
-ReconPilot supports three OpenAI-compatible providers. Only **one is active at a time**, selected by `LLM_PROVIDER`. If `LLM_PROVIDER` is unset, the app auto-detects: it prefers **Morpheus** when `MORPHEUS_API_KEY` is present, otherwise falls back to a previously-configured provider.
+```powershell
+New-Item -ItemType File .env.local
+```
 
-### Option A — Morpheus (default / recommended)
+Do not commit `.env.local`. It is ignored by Git.
+
+ReconPilot supports three OpenAI-compatible LLM providers. Choose one provider and add the matching variables.
+
+#### Option A: Morpheus
 
 ```env
 LLM_PROVIDER=morpheus
 MORPHEUS_API_KEY=replace_with_your_morpheus_key
 MORPHEUS_BASE_URL=https://api.mor.org/api/v1
-MORPHEUS_MODEL=gpt-oss-120b
+MORPHEUS_MODEL=llama-3.3-70b
 ```
 
-Get a key at <https://app.mor.org/api-keys?create=true>. `gpt-oss-120b` is the recommended model (strong instruction-following, returns clean JSON). Avoid "thinking/reasoning" models — they can return empty content and break extraction.
-
-### Option B — NVIDIA
+#### Option B: NVIDIA
 
 ```env
 LLM_PROVIDER=nvidia
 NVIDIA_API_KEY=replace_with_your_nvidia_key
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
 NVIDIA_MODEL=meta/llama-3.3-70b-instruct
 ```
 
-### Option C — Chutes
+#### Option C: Chutes
 
 ```env
 LLM_PROVIDER=chutes
 CHUTES_API_KEY=replace_with_your_chutes_key
+CHUTES_BASE_URL=https://llm.chutes.ai/v1
 CHUTES_MODEL=default:latency
 ```
 
-### Optional setting
+Optional retry setting:
 
 ```env
-# Total attempts per LLM call, including the first (handles rate limits / transient errors).
 LLM_MAX_ATTEMPTS=6
 ```
 
-> Environment variables are read at **server startup**. Restart the dev server after editing `.env.local`.
+If `LLM_PROVIDER` is not set, the app auto-detects a provider from available keys. It checks Morpheus first, then Chutes when no NVIDIA key is present, and otherwise falls back to NVIDIA.
 
-## 3. Run locally
+Restart the dev server after editing `.env.local`; environment variables are read at server startup.
+
+### 4. Run the application locally
+
+Start the Next.js development server:
 
 ```powershell
 npm run dev
 ```
 
-Then open:
+Open the app in your browser:
 
 ```text
 http://localhost:3000
 ```
 
-### Recommended manual flow
+### 5. Use the reconciliation workflow
 
-1. Upload invoice files in the **Invoices** panel and run extraction.
-2. Upload the bank statement in the **Bank Statements** panel and run extraction.
-3. Upload payment proofs in the **Payment Proofs** panel and run extraction.
-4. Uploading a payment proof triggers reconciliation automatically.
-5. Review the **Reconciliation Results** table.
-6. Click a result row to inspect Overview, Evidence, FX Reasoning, Agent Timeline, Trust & Audit, and Artifacts.
-7. Use the **Debug** link (or `/debug`) to inspect generated JSON paths.
+1. Upload invoice files in the Invoices area and run extraction.
+2. Upload bank statement files in the Bank Statements area and run extraction.
+3. Upload payment proof files in the Payment Proofs area and run extraction.
+4. Payment proof extraction triggers reconciliation automatically.
+5. Review the Reconciliation Results table.
+6. Open a result row to inspect overview data, evidence, FX reasoning, timeline, trust and audit details, and generated artifacts.
+7. Use `/debug` to inspect generated runtime JSON paths and clear local demo data.
 
----
-
-## Test, Type-check, and Build
+## Available Scripts
 
 ```powershell
-npm run typecheck   # tsc --noEmit
-npm test            # vitest run --globals
-npm run build       # next build
+npm run dev        # Start the local Next.js dev server
+npm run typecheck  # Run TypeScript checks
+npm test           # Run Vitest tests
+npm run build      # Create a production build
+npm start          # Start the production server after a successful build
 ```
 
-If the npm command shims fail on Windows, run the binaries through Node directly:
+If npm command shims fail on Windows, run the binaries through Node directly:
 
 ```powershell
 node .\node_modules\typescript\bin\tsc --noEmit
@@ -146,25 +158,26 @@ node .\node_modules\vitest\vitest.mjs run --globals
 node .\node_modules\next\dist\bin\next build
 ```
 
-## Test Data
+## Runtime Data
 
-Sample datasets are included for a quick end-to-end run:
-
-- `test_sample_1/`
-- `test_sample_cross_border/` — 3 invoices, 3 payment proofs, and a Maybank XLSX statement.
-
-## Clear Demo Data
-
-Use the dashboard/debug clear action before rerunning a full demo dataset. Runtime data is stored locally under:
+The app writes local runtime artifacts under:
 
 ```text
-runtime/extracted/
+runtime/
 ```
 
-Do not commit runtime output.
+This directory may contain extracted records, reconciliation outputs, audit action records, and generated artifacts. It is ignored by Git and can be cleared between demo runs.
+
+## Troubleshooting
+
+- Missing API key: confirm `.env.local` contains the key for the selected `LLM_PROVIDER`.
+- Provider changes not taking effect: stop and restart `npm run dev`.
+- Install fails on `xlsx`: confirm network access to the SheetJS CDN.
+- OCR is slow on first run: the English OCR model may need to download or warm its local cache.
+- Live FX lookup fails: the app can use local fallback FX fixtures, but online access gives better results.
 
 ## Notes
 
-- `.env.local`, `runtime/`, `.next/`, `node_modules/`, and OCR model files are ignored by Git.
-- Human-review buttons currently save local audit action JSON records; they do not yet perform a full accounting-system approval workflow.
-- The project is a hackathon MVP, so the parser supports the provided demo formats best. More bank/invoice templates require more parser rules and tests.
+- `.env.local`, `.env`, `runtime/`, `.next/`, `node_modules/`, TypeScript build info, and OCR model files are ignored by Git.
+- Human-review actions currently save local audit JSON records. They do not yet perform a full accounting-system approval workflow.
+- This is a hackathon MVP, so the parser works best with the provided demo formats. Additional bank or invoice templates should be added with matching parser rules and tests.
