@@ -18,6 +18,7 @@ import {
   statusMeta,
   timelineActorMeta
 } from "./adapter";
+import { DocumentCompare } from "./DocumentCompare";
 import { StatusChip } from "./StatusChip";
 import type { ReconciliationDisplayRow, RunStatus } from "./types";
 import type { EvidenceTrustLevel } from "../../lib/recon/reconciliation/types";
@@ -110,6 +111,7 @@ export function ReconciliationDetailModal({
   const [actionConfirm, setActionConfirm] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -131,6 +133,11 @@ export function ReconciliationDetailModal({
   const invoiceMyr = invoice ? myrEquivalent(invoice.amountDue, run) : null;
   const proofMyr = proof ? myrEquivalent(proof.financialPayload.paidAmount, run) : null;
   const bankMyr = bank ? myrEquivalent(bank.netCreditAmount ?? bank.amount, run) : null;
+  // Original uploaded files, traced back via each record's sourceFileId.
+  const invoiceFileId = invoice?.sourceFileId ?? null;
+  const proofFileId = proof?.sourceFileId ?? null;
+  const bankFileId = bank?.sourceFileId ?? null;
+  const canCompare = Boolean(invoiceFileId && proofFileId);
 
   function actionCode(label: string): string {
     switch (label) {
@@ -289,6 +296,17 @@ export function ReconciliationDetailModal({
                   evaluated for this proof; the signals show why it was not auto-matched.
                 </p>
               ) : null}
+              <div className="evidence-toolbar">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setShowCompare(true)}
+                  disabled={!canCompare}
+                  title={canCompare ? "View the invoice and payment proof side by side" : "Both an invoice and a payment proof file are needed to compare"}
+                >
+                  Compare invoice ↔ proof
+                </button>
+              </div>
               <div className="evidence-grid">
                 <div className="evidence-col">
                   <h4>Invoice</h4>
@@ -325,6 +343,11 @@ export function ReconciliationDetailModal({
                   ) : (
                     <p className="evidence-empty">No matched invoice.</p>
                   )}
+                  {invoiceFileId ? (
+                    <a className="view-file-link" href={`/api/files/${encodeURIComponent(invoiceFileId)}`} target="_blank" rel="noreferrer">
+                      View invoice file ↗
+                    </a>
+                  ) : null}
                 </div>
 
                 <div className="evidence-col">
@@ -362,6 +385,11 @@ export function ReconciliationDetailModal({
                   ) : (
                     <p className="evidence-empty">No matched payment proof.</p>
                   )}
+                  {proofFileId ? (
+                    <a className="view-file-link" href={`/api/files/${encodeURIComponent(proofFileId)}`} target="_blank" rel="noreferrer">
+                      View proof file ↗
+                    </a>
+                  ) : null}
                 </div>
 
                 <div className="evidence-col">
@@ -395,6 +423,11 @@ export function ReconciliationDetailModal({
                   ) : (
                     <p className="evidence-empty">No matched bank transaction.</p>
                   )}
+                  {bankFileId ? (
+                    <a className="view-file-link" href={`/api/files/${encodeURIComponent(bankFileId)}`} target="_blank" rel="noreferrer">
+                      View statement file ↗
+                    </a>
+                  ) : null}
                 </div>
               </div>
 
@@ -824,6 +857,17 @@ export function ReconciliationDetailModal({
           ))}
         </div>
       </div>
+
+      {showCompare ? (
+        <DocumentCompare
+          title={`Compare · ${row.invoiceLabel}`}
+          panes={[
+            { label: "Invoice", documentId: invoiceFileId },
+            { label: "Payment Proof", documentId: proofFileId }
+          ]}
+          onClose={() => setShowCompare(false)}
+        />
+      ) : null}
     </div>
   );
 }
