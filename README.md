@@ -126,7 +126,6 @@ http://localhost:3000
 4. Uploading a payment proof triggers reconciliation automatically.
 5. Review the **Reconciliation Results** table.
 6. Click a result row to inspect Overview, Evidence, FX Reasoning, Agent Timeline, Trust & Audit, and Artifacts.
-7. Use the **Debug** link (or `/debug`) to inspect generated JSON paths.
 
 ---
 
@@ -146,13 +145,6 @@ node .\node_modules\vitest\vitest.mjs run --globals
 node .\node_modules\next\dist\bin\next build
 ```
 
-## Test Data
-
-Sample datasets are included for a quick end-to-end run:
-
-- `test_sample_1/`
-- `test_sample_cross_border/` — 3 invoices, 3 payment proofs, and a Maybank XLSX statement.
-
 ## Clear Demo Data
 
 Use the dashboard/debug clear action before rerunning a full demo dataset. Runtime data is stored locally under:
@@ -160,8 +152,6 @@ Use the dashboard/debug clear action before rerunning a full demo dataset. Runti
 ```text
 runtime/extracted/
 ```
-
-Do not commit runtime output.
 
 ## Notes
 
