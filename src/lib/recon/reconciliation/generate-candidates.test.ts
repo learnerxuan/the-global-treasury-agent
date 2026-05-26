@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedInputBatch } from "../types";
 import { cleanNormalizedBatch } from "../fixtures/normalized/clean";
-import { generateBankAnchoredCandidates } from "./generate-candidates";
+import { generateBankAnchoredCandidates, isBankFeeRow } from "./generate-candidates";
 import { DEFAULT_POLICY } from "./policy";
 
 describe("generateBankAnchoredCandidates", () => {
@@ -66,6 +66,81 @@ describe("generateBankAnchoredCandidates", () => {
     if (!result.ok) return;
     expect(result.data.candidatesByBankTx["txn_debit"]?.[0]?.expectedPaymentId).toBe("exp_file_001_row002");
     expect(result.data.unmatchedBankTxIds).not.toContain("txn_debit");
+  });
+
+  it("attaches an invoice by exact amount when the transfer carries a bank wire reference (not the invoice number)", () => {
+    const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
+    const baseProof = cleanNormalizedBatch.paymentProofs[0]!;
+    const baseExpected = cleanNormalizedBatch.expectedPayments[0]!;
+
+    // Real inward transfer: the bank + proof share the wire reference (WIRE99XYZ);
+    // the invoice number (INV-6384) appears nowhere in the references, but the
+    // invoice amount exactly matches the proof.
+    const bank = {
+      ...baseBank,
+      internalTxId: "txn_wire",
+      normalizedReference: "WIRE99XYZ",
+      remittanceInformation: { raw: "INWARD TT REF WIRE99XYZ", structured: { invoiceNumber: "WIRE99XYZ" } }
+    };
+    const proof = {
+      ...baseProof,
+      proofId: "proof_wire",
+      financialPayload: {
+        ...baseProof.financialPayload,
+        reference: { raw: "WIRE99XYZ", normalized: "WIRE99XYZ" },
+        paidAmount: { value: "1555.36", currency: "EUR" as const }
+      }
+    };
+    const expected = {
+      ...baseExpected,
+      expectedPaymentId: "exp_wire",
+      invoiceNumber: "INV-6384",
+      reconciliationStatus: "OPEN" as const,
+      paymentReference: { raw: "INV-6384", normalized: "INV6384" },
+      amountDue: { value: "1555.36", currency: "EUR" as const },
+      outstandingAmount: { value: "1555.36", currency: "EUR" as const }
+    };
+    const batch: NormalizedInputBatch = { ...cleanNormalizedBatch, bankTransactions: [bank], paymentProofs: [proof], expectedPayments: [expected] };
+
+    const result = generateBankAnchoredCandidates({ batch, policy: DEFAULT_POLICY });
+    if (!result.ok) return;
+    const candidate = result.data.candidatesByBankTx.txn_wire?.[0];
+    expect(candidate?.proofId).toBe("proof_wire");
+    expect(candidate?.expectedPaymentId).toBe("exp_wire");
+    expect(candidate?.signals.some((s) => s.code === "AMOUNT_MATCHES_EXPECTED")).toBe(true);
+  });
+
+  it("excludes bank fee/charge rows from reconciliation", () => {
+    const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
+    const feeRow = {
+      ...baseBank,
+      internalTxId: "txn_fee",
+      creditDebitIndicator: "DBIT" as const,
+      amount: { value: "8.67", currency: "MYR" as const },
+      description: "INWARD TT FEE REF-76A85269",
+      rawDescription: "INWARD TT FEE REF-76A85269",
+      remittanceInformation: { raw: "INWARD TT FEE REF-76A85269", structured: null }
+    };
+    expect(isBankFeeRow(feeRow)).toBe(true);
+
+    const batch: NormalizedInputBatch = { ...cleanNormalizedBatch, bankTransactions: [feeRow] };
+    const result = generateBankAnchoredCandidates({ batch, policy: DEFAULT_POLICY });
+    if (!result.ok) return;
+    // A fee row is neither a candidate case nor an "unmatched settlement" — it is skipped.
+    expect(result.data.candidatesByBankTx.txn_fee).toBeUndefined();
+    expect(result.data.unmatchedBankTxIds).not.toContain("txn_fee");
+  });
+
+  it("treats an outgoing payment debit (no fee wording) as a real settlement", () => {
+    const baseBank = cleanNormalizedBatch.bankTransactions[0]!;
+    const debit = {
+      ...baseBank,
+      internalTxId: "txn_outgoing",
+      creditDebitIndicator: "DBIT" as const,
+      description: "Outgoing supplier payment INV-1001",
+      remittanceInformation: { raw: "Outgoing payment INV-1001", structured: { invoiceNumber: "INV-1001" } }
+    };
+    expect(isBankFeeRow(debit)).toBe(false);
   });
 
   it("uses the invoice as a bridge when proof reference is a provider transaction id", () => {

@@ -4,7 +4,7 @@ import { createArtifactRequest, createHumanReviewRequest, primaryArtifactType } 
 import { calculateFxScenarios } from "./calculate-fx-scenarios";
 import { classifyMatch } from "./classify";
 import { evaluateAmountResidual, evaluateFeeHypothesis } from "./evaluate-residual";
-import { generateBankAnchoredCandidates } from "./generate-candidates";
+import { generateBankAnchoredCandidates, isBankFeeRow } from "./generate-candidates";
 import { DEFAULT_POLICY, type ReconciliationPolicy } from "./policy";
 import { InMemoryPaymentApplicationStore } from "./stores";
 import { addMoney, compareMoney, subtractMoney } from "./money";
@@ -306,8 +306,14 @@ export function runReconciliationOrchestrator(
     };
   }
 
+  // Skip zero-value rows, already-consumed rows, and bank fee/charge rows — fees are
+  // not settlements; they explain a small residual on the related credit, not a case.
   const settlementRows = effectiveBatch.bankTransactions.filter(
-    (tx) => tx.amount.value !== "0" && tx.amount.value !== "0.00" && !paymentApplicationStore.isBankTransactionConsumed(tx.internalTxId)
+    (tx) =>
+      tx.amount.value !== "0" &&
+      tx.amount.value !== "0.00" &&
+      !isBankFeeRow(tx) &&
+      !paymentApplicationStore.isBankTransactionConsumed(tx.internalTxId)
   );
 
   for (const bankTx of settlementRows) {

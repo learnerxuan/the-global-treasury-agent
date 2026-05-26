@@ -163,11 +163,36 @@ describe("scoreCandidate", () => {
     expect(scored.data.hardReviewFlags).not.toContain("LOW_CONFIDENCE_CRITICAL_FIELD");
   });
 
-  it("flags unsettled proof payment status for human review", () => {
+  it("does not flag a pending proof status (settlement is proven by the matched bank credit)", () => {
     const candidate = makeCandidate({ paymentStatus: "PNDG" });
     const scored = scoreCandidate({ candidate, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
     if (!scored.ok) return;
-    expect(scored.data.hardReviewFlags).toContain("PROOF_NOT_SETTLED");
+    expect(scored.data.hardReviewFlags).not.toContain("PROOF_NOT_SETTLED");
+  });
+
+  it("credits a similar name fully when an exact reference anchors identity, half otherwise", () => {
+    const base = makeCandidate({});
+    const withExact: MatchCandidate = {
+      ...base,
+      signals: [
+        { code: "EXACT_REFERENCE_MATCH", strength: "STRONG", detail: "ref" },
+        { code: "NAME_SIMILAR", strength: "MEDIUM", detail: "similar payer" }
+      ]
+    };
+    const withoutExact: MatchCandidate = {
+      ...base,
+      signals: [
+        { code: "PARTIAL_REFERENCE_MATCH", strength: "MEDIUM", detail: "ref" },
+        { code: "NAME_SIMILAR", strength: "MEDIUM", detail: "similar payer" }
+      ]
+    };
+    const a = scoreCandidate({ candidate: withExact, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
+    const b = scoreCandidate({ candidate: withoutExact, fxScenarios: cleanFx, residual: cleanResidual, feeHypothesis: NONE_FEE, policy: DEFAULT_POLICY });
+    if (!a.ok || !b.ok) return;
+    // Exact reference + similar name => full name credit (counterparty is anchored).
+    expect(a.data.breakdown.name).toBe(DEFAULT_POLICY.score.nameMax);
+    // Partial reference + similar name => only half (identity not firmly anchored).
+    expect(b.data.breakdown.name).toBe(Math.round(DEFAULT_POLICY.score.nameMax / 2));
   });
 
   it("flags a residual above the hard threshold", () => {
@@ -199,9 +224,9 @@ describe("scoreCandidate", () => {
   });
 });
 
-function scoredWith(score: number, candidateId: string): ScoredCandidate {
+function scoredWith(score: number, candidateId: string, expectedPaymentId = `inv_${candidateId}`): ScoredCandidate {
   return {
-    candidate: { ...makeCandidate({}), candidateId },
+    candidate: { ...makeCandidate({}), candidateId, expectedPaymentId, expectedPaymentIds: [expectedPaymentId] },
     score,
     breakdown: { reference: 0, amountFx: 0, date: 0, name: 0, confidence: 0, competitionPenalty: 0 },
     fxScenarios: cleanFx,
@@ -214,18 +239,26 @@ function scoredWith(score: number, candidateId: string): ScoredCandidate {
 }
 
 describe("detectCompetingCandidates", () => {
-  it("detects competition when the top two are within the gap", () => {
-    const result = detectCompetingCandidates({ scoredCandidates: [scoredWith(90, "A"), scoredWith(85, "B")], policy: DEFAULT_POLICY });
+  it("detects competition when two different-invoice candidates are within the gap", () => {
+    const result = detectCompetingCandidates({ scoredCandidates: [scoredWith(90, "A", "inv_A"), scoredWith(85, "B", "inv_B")], policy: DEFAULT_POLICY });
     if (!result.ok) return;
     expect(result.data.hasCompetition).toBe(true);
     expect(result.data.gap).toBe(5);
   });
 
   it("reports no competition when there is a clear winner", () => {
-    const result = detectCompetingCandidates({ scoredCandidates: [scoredWith(95, "A"), scoredWith(70, "B")], policy: DEFAULT_POLICY });
+    const result = detectCompetingCandidates({ scoredCandidates: [scoredWith(95, "A", "inv_A"), scoredWith(70, "B", "inv_B")], policy: DEFAULT_POLICY });
     if (!result.ok) return;
     expect(result.data.hasCompetition).toBe(false);
     expect(result.data.gap).toBe(25);
+  });
+
+  it("does not flag competition between two candidates for the SAME invoice (e.g. duplicate proofs)", () => {
+    // Two close scores, but both settle the same invoice — no ambiguity, must not block.
+    const result = detectCompetingCandidates({ scoredCandidates: [scoredWith(100, "A", "inv_X"), scoredWith(98, "B", "inv_X")], policy: DEFAULT_POLICY });
+    if (!result.ok) return;
+    expect(result.data.hasCompetition).toBe(false);
+    expect(result.data.runnerUpScore).toBeNull();
   });
 
   it("reports no competition for a single candidate", () => {

@@ -78,7 +78,14 @@ function scoreDate(candidate: MatchCandidate, policy: ReconciliationPolicy): num
 
 function scoreName(candidate: MatchCandidate, policy: ReconciliationPolicy): number {
   if (hasPartySignal(candidate)) return policy.score.nameMax;
-  if (hasSignal(candidate, "NAME_SIMILAR")) return Math.round(policy.score.nameMax / 2);
+  if (hasSignal(candidate, "NAME_SIMILAR")) {
+    // An exact invoice-reference match already establishes the counterparty, so a
+    // merely-similar payer name (e.g. "ACME SDN BHD" vs "ACME") corroborates the
+    // match rather than weakening it — award full name credit. Without an exact
+    // reference to anchor identity, a similar name remains partial evidence.
+    if (hasSignal(candidate, "EXACT_REFERENCE_MATCH")) return policy.score.nameMax;
+    return Math.round(policy.score.nameMax / 2);
+  }
   return 0;
 }
 
@@ -208,9 +215,10 @@ function buildHardReviewFlags(candidate: MatchCandidate, residual: AmountResidua
   if (lowCriticalConfidence(evidenceTrust)) flags.push("LOW_CONFIDENCE_CRITICAL_FIELD");
 
   // Settlement is proven by the matched bank credit (actual cash received) plus
-  // explained money math — not by a status word on the customer's proof. So we
-  const status = candidate.proof?.financialPayload.paymentStatus;
-  if (status === "PNDG" || status === "ACSP") flags.push("PROOF_NOT_SETTLED");
+  // explained money math — not by a status word on the customer's proof. A
+  // "pending"/"in-progress" status (PNDG/ACSP) on the proof is therefore NOT a
+  // hard-review trigger: if the money landed in the bank and the residual is
+  // explained, the payment has settled regardless of what the proof document says.
 
   if (residual.band === "NO_SCENARIO") flags.push("NO_FX_SCENARIO");
   if (residual.exceedsHardReviewThreshold && residual.band !== "NO_SCENARIO" && residual.residualClassification !== "flatFee") {
@@ -273,6 +281,14 @@ export function scoreCandidate(input: {
   };
 }
 
+// Identity of the invoice(s) a candidate would settle. Two candidates with the
+// same key (e.g. two different proofs for one invoice) are NOT competing — there
+// is no ambiguity about which invoice receives the payment.
+function competingInvoiceKey(candidate: MatchCandidate): string {
+  const ids = candidate.expectedPaymentIds ?? (candidate.expectedPaymentId ? [candidate.expectedPaymentId] : []);
+  return [...ids].sort().join("+");
+}
+
 export function detectCompetingCandidates(input: {
   scoredCandidates: ScoredCandidate[];
   policy: ReconciliationPolicy;
@@ -280,7 +296,6 @@ export function detectCompetingCandidates(input: {
   const { scoredCandidates, policy } = input;
   const sorted = [...scoredCandidates].sort((a, b) => b.score - a.score);
   const top = sorted[0];
-  const runnerUp = sorted[1];
 
   if (!top) {
     return {
@@ -291,12 +306,21 @@ export function detectCompetingCandidates(input: {
     };
   }
 
+  // Competition only exists between candidates that would settle DIFFERENT invoices.
+  // The runner-up is the best-scored candidate resolving to a different invoice;
+  // same-invoice alternatives (duplicate proofs) never block an otherwise-clean match.
+  const topKey = competingInvoiceKey(top.candidate);
+  const runnerUp = sorted.slice(1).find((c) => {
+    const key = competingInvoiceKey(c.candidate);
+    return key !== "" && key !== topKey;
+  });
+
   if (!runnerUp) {
     return {
       ok: true,
       toolName: COMPETITION_TOOL,
       data: { hasCompetition: false, topScore: top.score, runnerUpScore: null, gap: null },
-      summary: "Single candidate; no competition."
+      summary: "No competing invoice; clear assignment."
     };
   }
 

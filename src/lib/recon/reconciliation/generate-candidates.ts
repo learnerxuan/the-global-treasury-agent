@@ -78,6 +78,23 @@ function amountEqual(a: MoneyAmount | null | undefined, b: MoneyAmount | null | 
   return a != null && b != null && a.currency === b.currency && compareMoney(a.value, b.value) === 0;
 }
 
+// Bank charge/fee rows (e.g. "INWARD TT FEE REF-...", "SERVICE CHARGE") are not
+// settlements — they are the bank's own deduction tied to a credit. They must not
+// be reconciled as standalone cases; the fee instead explains a small residual on
+// the related credit. Only DBIT rows that read as a fee/charge are excluded, so
+// genuine outgoing-payment debits still reconcile.
+const FEE_ROW_PATTERN = /\b(FEE|FEES|CHARGE|CHARGES|COMMISSION|SVC\s*CHG|SERVICE\s*CHG|SERVICE\s*CHARGE|HANDLING)\b/i;
+
+export function isBankFeeRow(tx: BankStatementTransaction): boolean {
+  if (tx.creditDebitIndicator !== "DBIT") return false;
+  const text = `${tx.description ?? ""} ${tx.remittanceInformation?.raw ?? ""}`;
+  return FEE_ROW_PATTERN.test(text);
+}
+
+function isReconcilableSettlementRow(tx: BankStatementTransaction): boolean {
+  return compareMoney(tx.amount.value, "0") !== 0 && !isBankFeeRow(tx);
+}
+
 function canReceivePayment(expected: ExpectedPaymentRecord): boolean {
   return expected.reconciliationStatus === "OPEN" || expected.reconciliationStatus === "PARTIALLY_MATCHED";
 }
@@ -256,13 +273,23 @@ function expectedBridgeQualifies(
   const expectedLinkedToBank = referenceLinked(refs, text, expectedRef);
   const expectedLinkedToProof =
     expectedRef !== null && proofRef !== null && (expectedRef === proofRef || partialReferenceMatch(expectedRef, proofRef, policy));
-  const expectedAmountMatchesProof = proofComparableAmounts(proof).some((amount) =>
-    amountEqual(amount, expected.outstandingAmount ?? expected.amountDue)
-  );
+  const expectedAmount = expected.outstandingAmount ?? expected.amountDue;
+  const expectedAmountMatchesProof = proofComparableAmounts(proof).some((amount) => amountEqual(amount, expectedAmount));
+  // A foreign-currency amount match (proof + invoice in a currency other than the
+  // bank's settlement currency) is the cross-border signature: the bank credit is
+  // local currency after FX, so an exact foreign-amount match is a meaningful link,
+  // not a round-number coincidence. A same-currency local amount match alone is NOT
+  // enough to attach an invoice (that stays the deliberate precision guard).
+  const foreignAmountBridge = expectedAmount.currency !== bank.amount.currency && expectedAmountMatchesProof;
   const proofBankIsPlausible = meetsThreshold(bpSignals);
 
   if (expectedLinkedToBank) return expectedLinkedToProof || expectedAmountMatchesProof || proofBankIsPlausible;
-  return expectedLinkedToProof && proofBankIsPlausible;
+  // Not reference-linked to the bank: real-world transfers carry the bank's own
+  // wire/TT reference (e.g. "REF-E8DEDE16"), not the invoice number. Attach when the
+  // invoice/proof reference cores match, OR a cross-border foreign amount matches
+  // exactly — provided the proof is already strongly tied to this bank credit.
+  // Competition detection guards the case where several invoices share an amount.
+  return (expectedLinkedToProof || foreignAmountBridge) && proofBankIsPlausible;
 }
 
 function amountForAllocation(expected: ExpectedPaymentRecord): MoneyAmount {
@@ -410,7 +437,7 @@ export function generateBankAnchoredCandidates(input: {
   const candidatesByBankTx: Record<string, MatchCandidate[]> = {};
   const unmatchedBankTxIds: string[] = [];
 
-  const settlementRows = batch.bankTransactions.filter((tx) => compareMoney(tx.amount.value, "0") !== 0);
+  const settlementRows = batch.bankTransactions.filter(isReconcilableSettlementRow);
   const proofs = batch.paymentProofs.filter((p) => !REJECTED_STATUSES.has(p.financialPayload.paymentStatus));
 
   let candidateSeq = 0;
