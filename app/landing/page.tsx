@@ -64,9 +64,9 @@ const FEATURES = [
 ];
 
 const STATS = [
-  { value: "< 30s", label: "Extraction per document" },
-  { value: "100%", label: "Cross-border FX coverage" },
-  { value: "0", label: "Manual data entry required" }
+  { value: "Fast", label: "Extraction per document" },
+  { value: "Global", label: "Cross-border FX coverage" },
+  { value: "Minimal", label: "Manual data entry required" }
 ];
 
 export default function LandingPage() {
@@ -95,9 +95,8 @@ export default function LandingPage() {
       <section className="landing-hero">
         <p className="eyebrow">Cross-border reconciliation</p>
         <h1 className="landing-h1">
-          AI extracts evidence.<br />
-          Code does money math.<br />
-          <span className="landing-h1-accent">Humans approve risky cases.</span>
+          AI extraction and reconciliation.<br />
+          <span className="landing-h1-accent">Human-guided review.</span>
         </h1>
         <p className="landing-hero-sub">
           ReconPilot connects your invoices, bank settlements, and payment proofs into a single reconciliation engine — handling FX conversion, reference matching, and trust scoring so your team only touches the exceptions.
