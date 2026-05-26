@@ -58,7 +58,7 @@ export function ReconciliationSettingsPanel() {
       <div className="settings-head">
         <div>
           <p style={{ color: "rgba(245, 248, 242, 0.52)", fontSize: "0.72rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "6px" }}>Tolerance policy</p>
-          <h2>Unexplained difference margin</h2>
+          <h2>Auto-match tolerance limit</h2>
         </div>
         <span className="settings-summary">{effectiveSummary}</span>
       </div>
