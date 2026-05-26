@@ -257,6 +257,13 @@ p {
   color: #ffd27a;
 }
 
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+}
+
 .workspace-main {
   min-width: 0;
 }
@@ -266,6 +273,15 @@ p {
   top: 18px;
   display: grid;
   gap: 14px;
+}
+
+@media (max-width: 1080px) {
+  .workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agent-rail {
+    position: static;
+  }
 }
 
 .rail-card {

@@ -254,44 +254,92 @@ export default function DashboardPage() {
         onRescan={rescan}
         rescanning={rescanning}
       />
-      <section className="workspace-main" aria-label="Reconciliation workspace">
-        <div className="section-title">
-          <div>
-            <p className="eyebrow">Evidence intake</p>
-            <h2>Upload source documents</h2>
+      <div className="workspace-grid">
+        <section className="workspace-main" aria-label="Reconciliation workspace">
+          <div className="section-title">
+            <div>
+              <p className="eyebrow">Evidence intake</p>
+              <h2>Upload source documents</h2>
+            </div>
+            <span className="hint">Invoices, bank rows, and payment proofs stay in the persisted waiting queue.</span>
           </div>
-          <span className="hint">Invoices, bank rows, and payment proofs stay in the persisted waiting queue.</span>
-        </div>
 
-        <section className="upload-strip" aria-label="Upload evidence">
-          {CARDS.map((card) => (
-            <UploadCard
-              key={card.key}
-              role={card.role}
-              title={card.title}
-              files={files[card.key]}
-              status={statuses[card.key]}
-              error={errors[card.key]}
-              notice={notices[card.key]}
-              storedWaiting={storedFor(card.key)}
-              latestRun={card.key === "paymentProofs" ? latestRun : null}
-              onFilesSelected={(selected) => setFiles((current) => ({ ...current, [card.key]: selected }))}
-              onSubmit={(event) => submitUpload(event, card)}
-            />
-          ))}
+          <section className="upload-strip" aria-label="Upload evidence">
+            {CARDS.map((card) => (
+              <UploadCard
+                key={card.key}
+                role={card.role}
+                title={card.title}
+                files={files[card.key]}
+                status={statuses[card.key]}
+                error={errors[card.key]}
+                notice={notices[card.key]}
+                storedWaiting={storedFor(card.key)}
+                latestRun={card.key === "paymentProofs" ? latestRun : null}
+                onFilesSelected={(selected) => setFiles((current) => ({ ...current, [card.key]: selected }))}
+                onSubmit={(event) => submitUpload(event, card)}
+              />
+            ))}
+          </section>
+
+          <MetricsStrip metrics={metrics} />
+
+          <ReconciliationResultsTable
+            rows={rows}
+            state={tableState}
+            errorMessage={errors.paymentProofs}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            onOpenRow={setOpenRow}
+          />
         </section>
 
-        <MetricsStrip metrics={metrics} />
+        <aside className="agent-rail" aria-label="Agent activity and review context">
+          <div className="rail-card rail-card-primary">
+            <span className="eyebrow">Review command</span>
+            <h3>{latestQuestion ?? "No active blocker"}</h3>
+            <p>
+              {latestRun
+                ? latestRun.nextAction
+                : "Run a payment proof after loading invoices and bank statements to populate the human review queue."}
+            </p>
+          </div>
 
-        <ReconciliationResultsTable
-          rows={rows}
-          state={tableState}
-          errorMessage={errors.paymentProofs}
-          statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
-          onOpenRow={setOpenRow}
-        />
-      </section>
+          <div className="rail-card">
+            <div className="rail-head">
+              <span className="eyebrow">Agent timeline</span>
+              <span className="num">{latestTimeline.length} events</span>
+            </div>
+            {latestTimeline.length > 0 ? (
+              <div className="rail-timeline">
+                {latestTimeline.map((event) => (
+                  <div className="rail-event" key={`${event.step}-${event.timestamp}`}>
+                    <span className="rail-dot" aria-hidden="true" />
+                    <div>
+                      <strong>{event.actor}</strong>
+                      <span>{event.action}</span>
+                      {event.resultSummary ? <p>{event.resultSummary}</p> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rail-empty">Agent activity appears here while extraction, FX checks, and scoring run.</p>
+            )}
+          </div>
+
+          <div className="rail-card compact">
+            <span className="eyebrow">Guide coverage</span>
+            <div className="coverage-list">
+              <span>Safety gates</span>
+              <span>FX provider trace</span>
+              <span>Allocation ledger</span>
+              <span>Evidence trust</span>
+              <span>Audit payload</span>
+            </div>
+          </div>
+        </aside>
+      </div>
 
       {openRow ? <ReconciliationDetailModal row={openRow} onClose={() => setOpenRow(null)} /> : null}
     </main>
