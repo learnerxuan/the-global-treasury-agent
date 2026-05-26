@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import {
+  allocationReasonLabel,
+  candidateKindLabel,
+  evidenceTrustMeta,
   findBank,
   findInvoice,
   findProof,
@@ -7,6 +10,8 @@ import {
   formatMoney,
   formatPercent,
   fxBasisLabel,
+  fxProviderLabel,
+  fxSourceKindLabel,
   fxSourceLabel,
   receivedAmount,
   statusMeta,
@@ -14,14 +19,16 @@ import {
 } from "./adapter";
 import { StatusChip } from "./StatusChip";
 import type { ReconciliationDisplayRow, RunStatus } from "./types";
+import type { EvidenceTrustLevel } from "../../lib/recon/reconciliation/types";
 
-type Tab = "overview" | "evidence" | "fx" | "timeline" | "artifacts";
+type Tab = "overview" | "evidence" | "fx" | "timeline" | "trust" | "artifacts";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "evidence", label: "Evidence" },
   { key: "fx", label: "FX Reasoning" },
   { key: "timeline", label: "Agent Timeline" },
+  { key: "trust", label: "Trust & Audit" },
   { key: "artifacts", label: "Artifacts" }
 ];
 
@@ -40,6 +47,48 @@ const ACTIONS: Record<RunStatus, string[]> = {
   UNMATCHED: ["Mark as Unresolved", "Upload Missing Evidence", "Create Discrepancy Note"],
   NO_PROOF_RECORD: ["Upload Missing Evidence"]
 };
+
+// Trust level shown as a 4-rung ladder from least to most trustworthy.
+const TRUST_LADDER: Array<{ level: EvidenceTrustLevel; label: string }> = [
+  { level: "missing_proof", label: "Missing" },
+  { level: "weak_ai", label: "Weak AI" },
+  { level: "supported_ai", label: "AI-supported" },
+  { level: "deterministic", label: "Deterministic" }
+];
+
+const TRUST_BLURB: Record<EvidenceTrustLevel, string> = {
+  deterministic: "Fields were parsed deterministically (CSV / spreadsheet / manual) — the highest-trust source.",
+  supported_ai: "AI-extracted, with every critical field above the confidence floor.",
+  weak_ai: "AI-extracted, but one or more critical fields fell below the confidence floor.",
+  missing_proof: "No payment-proof evidence was available to support this match."
+};
+
+function trustRank(level: EvidenceTrustLevel): number {
+  return Math.max(0, TRUST_LADDER.findIndex((step) => step.level === level));
+}
+
+// "financialPayload.paidAmount.value" -> "Paid Amount Value"; "aiMetadata.overallConfidence" -> "Overall Confidence".
+function prettyField(field: string): string {
+  return field
+    .split(".")
+    .filter((seg) => seg !== "financialPayload" && seg !== "aiMetadata")
+    .join(" ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[._]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function routeLabel(route: string | null): string {
+  if (!route) return "—";
+  return route
+    .replace(/_/g, " ")
+    .replace(/\bpdf\b/i, "PDF")
+    .replace(/\bocr\b/i, "OCR")
+    .replace(/\bcsv\b/i, "CSV")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function formatCode(code: string): string {
   return code
@@ -172,8 +221,24 @@ export function ReconciliationDetailModal({
                 <div className="fb-label">Decision</div>
                 <div className="fb-value decision-line">
                   <StatusChip status={run.status} />
+                  {selected?.evidenceTrust ? (
+                    <span className={`chip ${evidenceTrustMeta(selected.evidenceTrust.level).tone}`}>
+                      {evidenceTrustMeta(selected.evidenceTrust.level).label}
+                    </span>
+                  ) : null}
                 </div>
               </div>
+              {selected?.candidateKind ? (
+                <div className="field-block">
+                  <div className="fb-label">Match type</div>
+                  <div className="fb-value">
+                    {candidateKindLabel(selected.candidateKind)}
+                    {selected.expectedPaymentIds && selected.expectedPaymentIds.length > 1
+                      ? ` · ${selected.expectedPaymentIds.length} invoices`
+                      : ""}
+                  </div>
+                </div>
+              ) : null}
               <div className="field-block">
                 <div className="fb-label">Reason</div>
                 <div className="fb-value">{selected?.explanation ?? run.summary ?? REASON_COPY[run.status]}</div>
@@ -182,6 +247,30 @@ export function ReconciliationDetailModal({
                 <div className="fb-label">Next action</div>
                 <div className="fb-value">{run.nextAction}</div>
               </div>
+              {selected?.reviewPayload?.required ? (
+                <div className="field-block">
+                  <div className="fb-label">Human review</div>
+                  <div className="fb-value">
+                    {selected.reviewPayload.primaryQuestion ?? "This case requires human review."}
+                    {selected.reviewPayload.blockers.length > 0 ? (
+                      <div className="chip-row">
+                        {selected.reviewPayload.blockers.map((flag) => (
+                          <span key={flag} className="chip plain">
+                            {formatCode(flag)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {selected.reviewPayload.suggestedActions.length > 0 ? (
+                      <ul className="suggested-actions">
+                        {selected.reviewPayload.suggestedActions.map((action) => (
+                          <li key={action}>{action}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -320,6 +409,35 @@ export function ReconciliationDetailModal({
                   <p className="evidence-empty">Not enough matched records to compare signals.</p>
                 )}
               </div>
+
+              {selected?.allocations && selected.allocations.length > 0 ? (
+                <div className="alloc-block">
+                  <h4>
+                    Payment allocation
+                    {selected.allocations.length > 1 ? ` · ${selected.allocations.length} invoices` : ""}
+                  </h4>
+                  <table className="alloc-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice</th>
+                        <th>Applied</th>
+                        <th>Remaining</th>
+                        <th>Basis</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selected.allocations.map((alloc) => (
+                        <tr key={alloc.expectedPaymentId}>
+                          <td className="num">{alloc.invoiceNumber}</td>
+                          <td className="num">{formatMoney(alloc.appliedAmount)}</td>
+                          <td className="num">{formatMoney(alloc.remainingAmount)}</td>
+                          <td>{allocationReasonLabel(alloc.reason)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -357,6 +475,24 @@ export function ReconciliationDetailModal({
                         <dt>Residual %</dt>
                         <dd className="num">{formatPercent(selected.bestFxScenario.residualPercent)}</dd>
                       </div>
+                      {selected.bestFxScenario.fxSourceKind ? (
+                        <div>
+                          <dt>FX source</dt>
+                          <dd>{fxSourceKindLabel(selected.bestFxScenario.fxSourceKind)}</dd>
+                        </div>
+                      ) : null}
+                      {fxProviderLabel(selected.bestFxScenario.providerId) ? (
+                        <div>
+                          <dt>Provider</dt>
+                          <dd>{fxProviderLabel(selected.bestFxScenario.providerId)}</dd>
+                        </div>
+                      ) : null}
+                      {selected.bestFxScenario.spreadMargin ? (
+                        <div>
+                          <dt>Spread margin</dt>
+                          <dd className="num">{formatPercent(selected.bestFxScenario.spreadMargin)}</dd>
+                        </div>
+                      ) : null}
                     </dl>
                     <p className="fx-source">{fxSourceLabel(selected.bestFxScenario.rateSource)}</p>
                   </div>
@@ -398,6 +534,166 @@ export function ReconciliationDetailModal({
                 })
               )}
             </div>
+          ) : null}
+
+          {tab === "trust" ? (
+            <>
+              {selected?.evidenceTrust ? (
+                (() => {
+                  const trust = selected.evidenceTrust;
+                  const meta = evidenceTrustMeta(trust.level);
+                  const rank = trustRank(trust.level);
+                  return (
+                    <div className="trust-card">
+                      <div className={`trust-hero ${meta.tone}`}>
+                        <div className="trust-hero-top">
+                          <span className="trust-hero-eyebrow">Evidence trust</span>
+                          <span className={`chip ${meta.tone}`}>{meta.label}</span>
+                        </div>
+                        <div className="trust-ladder" role="img" aria-label={`Evidence trust level: ${meta.label}`}>
+                          {TRUST_LADDER.map((step, index) => (
+                            <span
+                              key={step.level}
+                              className={`trust-rung ${index <= rank ? `filled ${meta.tone}` : ""}`}
+                              title={step.label}
+                            />
+                          ))}
+                        </div>
+                        <p className="trust-blurb">{TRUST_BLURB[trust.level]}</p>
+                      </div>
+
+                      <div className="trust-stats">
+                        <div className="trust-stat">
+                          <span className="ts-label">Extraction route</span>
+                          <span className="ts-value">{routeLabel(trust.extractionRoute)}</span>
+                        </div>
+                        <div className="trust-stat">
+                          <span className="ts-label">Evidence spans</span>
+                          <span className="ts-value">{trust.hasEvidenceSpans ? "Present" : "None"}</span>
+                        </div>
+                        <div className="trust-stat">
+                          <span className="ts-label">Fields checked</span>
+                          <span className="ts-value num">{trust.criticalFieldsChecked.length}</span>
+                        </div>
+                      </div>
+
+                      {trust.criticalFieldsChecked.length > 0 ? (
+                        <div className="trust-section">
+                          <div className="trust-section-label">Verified critical fields</div>
+                          <div className="chip-row">
+                            {trust.criticalFieldsChecked.map((field) => (
+                              <span key={field} className="chip verified">
+                                {prettyField(field)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {trust.issues.length > 0 ? (
+                        <div className="trust-section">
+                          <div className="trust-section-label">Confidence issues</div>
+                          <div className="trust-issues">
+                            {trust.issues.map((issue) => {
+                              const pct = issue.confidence === null ? null : Math.round(issue.confidence * 100);
+                              return (
+                                <div className="trust-issue" key={`${issue.field}-${issue.message}`}>
+                                  <div className="ti-row">
+                                    <span className="ti-field">{prettyField(issue.field)}</span>
+                                    <span className="ti-pct num">{pct === null ? "—" : `${pct}%`}</span>
+                                  </div>
+                                  <div className="ti-meter">
+                                    <span className="ti-meter-fill" style={{ width: pct === null ? "0%" : `${pct}%` }} />
+                                    <span
+                                      className="ti-meter-floor"
+                                      style={{ left: `${Math.round(issue.threshold * 100)}%` }}
+                                      title={`Confidence floor ${Math.round(issue.threshold * 100)}%`}
+                                    />
+                                  </div>
+                                  <div className="ti-msg">{issue.message}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="trust-clear">✓ All critical fields cleared the confidence floor.</div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : null}
+
+              {selected?.auditTrail ? (
+                <div className="audit-card">
+                  <div className="audit-head">
+                    <h4>Audit trail</h4>
+                    <span className="chip plain">Policy {selected.auditTrail.policyVersion}</span>
+                  </div>
+                  <dl className="audit-grid">
+                    <div>
+                      <dt>Selected candidate</dt>
+                      <dd className="num">{selected.auditTrail.selectedCandidateId ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Match type</dt>
+                      <dd>{candidateKindLabel(selected.auditTrail.candidateKind ?? undefined)}</dd>
+                    </div>
+                    <div>
+                      <dt>FX source</dt>
+                      <dd>{fxSourceKindLabel(selected.auditTrail.fxSourceKind ?? undefined)}</dd>
+                    </div>
+                    <div>
+                      <dt>FX scenario</dt>
+                      <dd className="num">{selected.auditTrail.fxScenarioId ?? "—"}</dd>
+                    </div>
+                  </dl>
+                  {selected.auditTrail.reasonCodes.length > 0 ? (
+                    <div className="audit-section">
+                      <span className="audit-section-label">Reason codes</span>
+                      <div className="chip-row">
+                        {selected.auditTrail.reasonCodes.map((code) => (
+                          <span key={code} className="chip plain">
+                            {formatCode(code)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {selected.auditTrail.hardReviewFlags.length > 0 ? (
+                    <div className="audit-section">
+                      <span className="audit-section-label">Hard review flags</span>
+                      <div className="chip-row">
+                        {selected.auditTrail.hardReviewFlags.map((flag) => (
+                          <span key={flag} className="chip review">
+                            {formatCode(flag)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {selected.auditTrail.evidenceRefs.length > 0 ? (
+                    <div className="audit-section">
+                      <span className="audit-section-label">Evidence references</span>
+                      <div className="chip-row">
+                        {selected.auditTrail.evidenceRefs.map((ref) => (
+                          <span key={`${ref.kind}-${ref.id}`} className="chip ref-chip">
+                            <span className="ref-kind">{formatCode(ref.kind)}</span>
+                            <span className="num">{ref.id}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!selected?.evidenceTrust && !selected?.auditTrail ? (
+                <p className="evidence-empty">
+                  No trust or audit metadata on this run. Re-run reconciliation to generate the enterprise audit trail.
+                </p>
+              ) : null}
+            </>
           ) : null}
 
           {tab === "artifacts" ? (

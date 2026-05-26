@@ -2,7 +2,17 @@ import { describe, expect, it } from "vitest";
 import { fxVarianceBatch, noCandidateBatch } from "../../lib/recon/reconciliation/fixtures";
 import { runReconciliationOrchestrator } from "../../lib/recon/reconciliation/orchestrator";
 import type { NormalizedInputBatch } from "../../lib/recon/types";
-import { buildDisplayRow, formatMoney, fxBasisLabel, statusMeta } from "./adapter";
+import {
+  allocationReasonLabel,
+  buildDisplayRow,
+  candidateKindLabel,
+  evidenceTrustMeta,
+  formatMoney,
+  fxBasisLabel,
+  fxProviderLabel,
+  fxSourceKindLabel,
+  statusMeta
+} from "./adapter";
 import type { ReconciliationRun, RunStatus } from "./types";
 
 // Build a UI-shaped ReconciliationRun directly from real engine output so the
@@ -58,6 +68,28 @@ describe("dashboard adapter", () => {
   it("labels FX bases in plain English", () => {
     expect(fxBasisLabel("payment_date")).toBe("Payment date");
     expect(fxBasisLabel("invoice_date")).toBe("Invoice date");
+  });
+
+  it("labels enterprise FX source kinds and the BNM provider", () => {
+    expect(fxSourceKindLabel("bank_actual")).toBe("Bank actual rate");
+    expect(fxSourceKindLabel("market_cached")).toBe("Live market rate (cached)");
+    expect(fxSourceKindLabel("spread_adjusted")).toBe("Spread-adjusted market rate");
+    expect(fxSourceKindLabel(undefined)).toBe("—");
+    expect(fxProviderLabel("bnm")).toBe("Bank Negara Malaysia (BNM)");
+    expect(fxProviderLabel(undefined)).toBeNull();
+  });
+
+  it("labels candidate kinds and allocation reasons", () => {
+    expect(candidateKindLabel("batch_invoices")).toBe("Batch · multiple invoices");
+    expect(candidateKindLabel("single_invoice")).toBe("Single invoice");
+    expect(allocationReasonLabel("subset_sum")).toBe("Matched by amount sum");
+    expect(allocationReasonLabel("partial_payment")).toBe("Partial payment");
+  });
+
+  it("maps evidence trust levels to tone-coded chips", () => {
+    expect(evidenceTrustMeta("deterministic")).toMatchObject({ tone: "success" });
+    expect(evidenceTrustMeta("weak_ai")).toMatchObject({ tone: "review" });
+    expect(evidenceTrustMeta("missing_proof")).toMatchObject({ tone: "error" });
   });
 
   it("builds a populated display row from a real auto-matchable run", () => {

@@ -3,6 +3,12 @@
 // We only format strings for presentation.
 
 import type {
+  AllocationReason,
+  CandidateKind,
+  EvidenceTrustLevel,
+  FxSourceKind
+} from "../../lib/recon/reconciliation/types";
+import type {
   BankStatementTransaction,
   ExpectedPaymentRecord,
   NormalizedPaymentProofRecord,
@@ -77,7 +83,81 @@ export function fxSourceLabel(source: string | undefined): string {
   if (source === "bank") return "Rate source: bank statement (recorded FX)";
   if (source.startsWith("fixture")) return "Rate source: local FX fixture table";
   if (source === "same_currency") return "Rate source: same currency (no conversion)";
+  if (source === "live_api") return "Rate source: live central-bank API";
   return `Rate source: ${source}`;
+}
+
+// Where the selected FX rate ultimately came from (set during the enterprise FX
+// upgrade). Distinct from rateSource: this is the trust tier the engine assigns.
+export function fxSourceKindLabel(kind: FxSourceKind | undefined): string {
+  switch (kind) {
+    case "bank_actual":
+      return "Bank actual rate";
+    case "proof_declared":
+      return "Proof-declared rate";
+    case "market_cached":
+      return "Live market rate (cached)";
+    case "fixture_fallback":
+      return "Fixture fallback";
+    case "spread_adjusted":
+      return "Spread-adjusted market rate";
+    default:
+      return kind ?? "—";
+  }
+}
+
+export function fxProviderLabel(providerId: string | undefined): string | null {
+  if (!providerId) return null;
+  if (providerId === "bnm") return "Bank Negara Malaysia (BNM)";
+  if (providerId === "fixture") return "Local fixture table";
+  return providerId;
+}
+
+export function candidateKindLabel(kind: CandidateKind | undefined): string {
+  switch (kind) {
+    case "single_invoice":
+      return "Single invoice";
+    case "batch_invoices":
+      return "Batch · multiple invoices";
+    case "proof_only":
+      return "Proof only";
+    case "bank_only":
+      return "Bank only";
+    default:
+      return "—";
+  }
+}
+
+export function allocationReasonLabel(reason: AllocationReason): string {
+  switch (reason) {
+    case "single_invoice":
+      return "Single invoice";
+    case "remittance_advice":
+      return "Remittance advice";
+    case "subset_sum":
+      return "Matched by amount sum";
+    case "partial_payment":
+      return "Partial payment";
+    default:
+      return reason;
+  }
+}
+
+export type TrustMeta = { label: string; tone: StatusTone };
+
+export function evidenceTrustMeta(level: EvidenceTrustLevel | undefined): TrustMeta {
+  switch (level) {
+    case "deterministic":
+      return { label: "Deterministic", tone: "success" };
+    case "supported_ai":
+      return { label: "AI-supported", tone: "info" };
+    case "weak_ai":
+      return { label: "Weak AI evidence", tone: "review" };
+    case "missing_proof":
+      return { label: "Missing proof", tone: "error" };
+    default:
+      return { label: "Unknown", tone: "neutral" };
+  }
 }
 
 export function findInvoice(run: ReconciliationRun): ExpectedPaymentRecord | undefined {
